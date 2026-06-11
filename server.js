@@ -1,5 +1,5 @@
 require("dotenv").config();
-const express  = require("express");
+const express = require("express");
 const mongoose = require("mongoose");
 const cors     = require("cors");
 
@@ -50,6 +50,7 @@ const articuloSchema = new mongoose.Schema(
   { timestamps: true }
 );
 const Articulo = mongoose.model("Articulo", articuloSchema, "articulos_proveedores");
+
 
 // ════════════════════════════════════════════════════════════════════════════
 // RUTAS
@@ -237,6 +238,77 @@ app.delete("/api/resenas/:id", async (req, res) => {
     res.status(500).json({ error: "Error al eliminar" });
   }
 });
+
+
+// ── SISTEMA EXPERTO: MOTOR DE INFERENCIA LÓGICA ────────────────────────────
+
+// POST /api/recomendar
+// Este endpoint procesa las respuestas del cliente y deduce las reglas/filtros técnicos idóneos.
+app.post("/api/recomendar", (req, res) => {
+  try {
+    const { presupuesto, uso_principal, requiere_bateria } = req.body;
+
+    // Validación de entrada
+    if (!presupuesto || !uso_principal) {
+      return res.status(400).json({ error: "El presupuesto y el uso principal son requeridos" });
+    }
+
+    // 1. Inicializamos los filtros técnicos por defecto basados en el presupuesto del cliente
+    let filtrosSugeridos = {
+      precio_max:  floatval = parseFloat(presupuesto),
+      ram_min:     4,
+      camara_min:  12,
+      bateria_min: 4000,
+      procesador:  "media"
+    };
+
+    // 2. Motor de Inferencia: Evaluamos las reglas de negocio según el perfil de uso seleccionado
+    switch (uso_principal.toLowerCase()) {
+      case "gaming":
+      case "juegos":
+        // REGLA: Si quiere jugar, se exige rendimiento alto, procesador tope y mínimo 8GB de RAM
+        filtrosSugeridos.ram_min = 8;
+        filtrosSugeridos.procesador = "alta";
+        break;
+
+      case "fotografia":
+      case "fotos":
+        // REGLA: Si busca fotografía, se priorizan sensores avanzados de alta resolución (mínimo 48MP)
+        filtrosSugeridos.camara_min = 48;
+        filtrosSugeridos.ram_min = 6; // Se sube la RAM para procesamiento de imágenes complejas
+        break;
+
+      case "redes":
+      case "basico":
+        // REGLA: Para tareas básicas (redes sociales, llamadas), se mantienen parámetros estándar para optimizar costo
+        filtrosSugeridos.ram_min = 4;
+        filtrosSugeridos.procesador = "media";
+        break;
+        
+      default:
+        // Caso preventivo: Perfil equilibrado estándar
+        filtrosSugeridos.ram_min = 4;
+        break;
+    }
+
+    // 3. Regla Condicional Cruzada: Evaluar autonomía si el usuario lo requiere expresamente
+    if (requiere_bateria === true || requiere_bateria === "si") {
+      filtrosSugeridos.bateria_min = 4500; // Forzamos una batería de larga duración en los resultados
+    }
+
+    // 4. Respondemos al Frontend con las directivas calculadas por el Sistema Experto
+    res.json({
+      success: true,
+      mensaje: "Perfil evaluado por el sistema experto con éxito",
+      filtros: filtrosSugeridos
+    });
+
+  } catch (err) {
+    console.error("Error en Sistema Experto (Render):", err);
+    res.status(500).json({ error: "Error interno en el motor de inferencia lítica" });
+  }
+});
+
 
 // ── Inicio servidor ───────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
