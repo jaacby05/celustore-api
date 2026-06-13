@@ -41,11 +41,27 @@ const Resena = mongoose.model("Resena", resenaSchema, "resenas");
 // ── Schema Artículo de Proveedor ──────────────────────────────────────────
 const articuloSchema = new mongoose.Schema(
   {
-    denominacion: { type: String, required: true },
-    precio:       { type: Number, required: true },
-    cantidad:     { type: Number, required: true },
-    campo:        { type: String, required: true },
-    id_proveedor: { type: Number, required: true },
+    // Campos comunes
+    tipo:             { type: String, required: true, enum: ["celular", "accesorio"] },
+    marca:            { type: String, required: true },
+    condicion:        { type: String, required: true, enum: ["nuevo", "reacondicionado", "sellado"] },
+    cantidad:         { type: Number, required: true, min: 1 },
+    precio:           { type: Number, required: true, min: 0 },
+    id_proveedor:     { type: Number, required: true },
+    proveedor_nombre: { type: String, default: "" },
+
+    // Solo celulares
+    modelo:           { type: String, default: "" },
+    color:            { type: String, default: "" },
+    almacenamiento:   { type: String, default: "" },
+    ram:              { type: String, default: "" },
+    bateria:          { type: Number, default: null },
+    camara:           { type: Number, default: null },
+
+    // Solo accesorios
+    categoria:        { type: String, default: "" },
+    descripcion:      { type: String, default: "" },
+    compatible_con:   { type: String, default: "" },
   },
   { timestamps: true }
 );
@@ -72,7 +88,8 @@ app.get("/api/articulos", async (req, res) => {
   try {
     const filtro = {};
     if (req.query.id_proveedor) filtro.id_proveedor = parseInt(req.query.id_proveedor);
-    if (req.query.campo)        filtro.campo = { $regex: req.query.campo, $options: "i" };
+    if (req.query.tipo)         filtro.tipo  = req.query.tipo;
+    if (req.query.marca)        filtro.marca = { $regex: req.query.marca, $options: "i" };
     if (req.query.precio_max)   filtro.precio = { ...filtro.precio, $lte: parseFloat(req.query.precio_max) };
     if (req.query.precio_min)   filtro.precio = { ...filtro.precio, $gte: parseFloat(req.query.precio_min) };
 
@@ -116,22 +133,45 @@ app.get("/api/articulos/:id", async (req, res) => {
 // POST /api/articulos
 app.post("/api/articulos", async (req, res) => {
   try {
-    const { denominacion, precio, cantidad, campo, id_proveedor } = req.body;
-    if (!denominacion || precio === undefined || cantidad === undefined || !campo || !id_proveedor) {
-      return res.status(400).json({ error: "Todos los campos son obligatorios" });
+    const {
+      tipo, marca, condicion, cantidad, precio, id_proveedor, proveedor_nombre,
+      // celular
+      modelo, color, almacenamiento, ram, bateria, camara,
+      // accesorio
+      categoria, descripcion, compatible_con,
+    } = req.body;
+
+    if (!tipo || !marca || !condicion || !cantidad || precio === undefined || !id_proveedor) {
+      return res.status(400).json({ error: "Faltan campos obligatorios" });
     }
+    if (!["celular", "accesorio"].includes(tipo)) {
+      return res.status(400).json({ error: "Tipo inválido" });
+    }
+
     const nuevoArticulo = new Articulo({
-      denominacion,
-      precio:       parseFloat(precio),
-      cantidad:     parseInt(cantidad),
-      campo,
-      id_proveedor: parseInt(id_proveedor),
+      tipo, marca, condicion,
+      cantidad:         parseInt(cantidad),
+      precio:           parseFloat(precio),
+      id_proveedor:     parseInt(id_proveedor),
+      proveedor_nombre: proveedor_nombre || "",
+      // celular
+      modelo:         modelo         || "",
+      color:          color          || "",
+      almacenamiento: almacenamiento || "",
+      ram:            ram            || "",
+      bateria:        bateria        ? parseInt(bateria)  : null,
+      camara:         camara         ? parseInt(camara)   : null,
+      // accesorio
+      categoria:      categoria      || "",
+      descripcion:    descripcion    || "",
+      compatible_con: compatible_con || "",
     });
+
     await nuevoArticulo.save();
     res.status(201).json({ success: true, mensaje: "Artículo guardado en MongoDB", articulo: nuevoArticulo });
   } catch (err) {
     console.error("Error POST articulo:", err);
-    res.status(500).json({ error: "Error al guardar artículo" });
+    res.status(500).json({ error: "Error al guardar artículo: " + err.message });
   }
 });
 
