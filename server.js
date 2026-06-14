@@ -522,6 +522,10 @@ app.post("/api/scores", async (req, res) => {
       }
     }
 
+    // DEBUG — mostrar fragmento entre Display y Performance
+    const dbgReview = html.match(/Display([\s\S]{1,200})Performance/);
+    if (dbgReview) console.log("DEBUG Review section:", JSON.stringify(dbgReview[0].slice(0, 150)));
+
     // Camera score — Nanoreview tiene dos estructuras posibles:
     // 1) HTML crudo: <span class="score-bar-result-square">90</span> después de "Camera"
     // 2) Texto plano: "Camera\n\n 90*" o "Camera\n\t...\t90"
