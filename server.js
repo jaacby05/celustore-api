@@ -368,7 +368,7 @@ app.post("/api/gemini", async (req, res) => {
       return res.status(500).json({ error: "API key de Gemini no configurada" });
     }
 
-    const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+    const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
 
     const systemPrompt = `Sos el asistente virtual experto de CeluStore, una tienda de celulares y accesorios en Argentina.
 Tu trabajo es ayudar a los clientes a elegir el mejor producto según sus necesidades reales.
