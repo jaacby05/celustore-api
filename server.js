@@ -522,14 +522,46 @@ app.post("/api/scores", async (req, res) => {
       }
     }
 
-    // Camera score: buscar "Camera" seguido del span score-bar-result-square
-    // Estructura: Camera\n\t...<span class="score-bar-result-square">90</span>
-    const posCamera = html.indexOf("Camera\n");
-    if (posCamera !== -1) {
-      const fragCamera = html.slice(posCamera, posCamera + 400);
-      const mSpan = fragCamera.match(/score-bar-result-square[^>]*>(\d{2,3})<\/span>/);
-      if (mSpan) {
-        const n = parseInt(mSpan[1]);
+    // Camera score — Nanoreview tiene dos estructuras posibles:
+    // 1) HTML crudo: <span class="score-bar-result-square">90</span> después de "Camera"
+    // 2) Texto plano: "Camera\n\n 90*" o "Camera\n\t...\t90"
+
+    // Método 1: span score-bar-result-square justo después de "Camera"
+    // Buscar todas las ocurrencias de "Camera" y tomar la primera que tenga el span cerca
+    {
+      let searchFrom = 0;
+      while (!camara) {
+        const pos = html.indexOf("Camera", searchFrom);
+        if (pos === -1) break;
+        // Solo mirar los siguientes 500 chars
+        const frag = html.slice(pos, pos + 500);
+        // Debe ser "Camera" como etiqueta de categoría, no "camera" en medio de texto largo
+        // Si tiene más de 20 chars sin salto de línea antes del número, es texto corrido → saltar
+        const spanMatch = frag.match(/score-bar-result-square[^>]*>(\d{2,3})<\/span>/);
+        if (spanMatch) {
+          const n = parseInt(spanMatch[1]);
+          if (n >= 30 && n <= 100) { camara = n; break; }
+        }
+        searchFrom = pos + 1;
+      }
+    }
+
+    // Método 2: texto plano "Camera" + saltos/tabs + número de 2-3 dígitos + asterisco opcional
+    if (!camara) {
+      // Buscar "Camera" seguido de whitespace (tabs, newlines) y luego un número de 2-3 dígitos
+      const m2 = html.match(/\bCamera\b[\t\r\n ]{1,20}(\d{2,3})\*?[\t\r\n ]/);
+      if (m2) {
+        const n = parseInt(m2[1]);
+        if (n >= 30 && n <= 100) camara = n;
+      }
+    }
+
+    // Método 3: buscar el patrón de la sección Review completa
+    // "Display\n94\nCamera\n90\nPerformance\n96"
+    if (!camara) {
+      const reviewMatch = html.match(/Display[\s\S]{1,30}?(\d{2,3})[\s\S]{1,5}?Camera[\s\S]{1,30}?(\d{2,3})\*?[\s\S]{1,5}?Performance/);
+      if (reviewMatch) {
+        const n = parseInt(reviewMatch[2]);
         if (n >= 30 && n <= 100) camara = n;
       }
     }
