@@ -437,6 +437,139 @@ ${catalogo || "Sin productos disponibles - informa al cliente que no hay stock."
 });
 
 
+// ── SCORES NANOREVIEW ─────────────────────────────────────────────────────
+// POST /api/scores
+// Recibe { marca, nombre } y devuelve { antutu, dxomark } scrapeando nanoreview.net
+// Se llama desde el admin de InfinityFree que no puede hacer requests externos.
+
+app.post("/api/scores", async (req, res) => {
+  const { marca = "", nombre = "" } = req.body;
+
+  if (!marca && !nombre) {
+    return res.status(400).json({ error: "Faltan marca y nombre" });
+  }
+
+  // ── Construir slugs posibles ──────────────────────────────────────────
+  function buildSlug(m, n) {
+    return (m + " " + n)
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9\s-]/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-");
+  }
+
+  const slugs = [buildSlug(marca, nombre)];
+  // Si el nombre ya incluye la marca (ej: "Samsung Galaxy A17"), probar sin marca
+  if (nombre.toLowerCase().includes(marca.toLowerCase())) {
+    slugs.push(buildSlug("", nombre));
+  }
+  // Solo primera palabra de la marca
+  const primeraMarca = marca.split(" ")[0];
+  if (primeraMarca !== marca) slugs.push(buildSlug(primeraMarca, nombre));
+
+  // ── Fetch Nanoreview ──────────────────────────────────────────────────
+  async function fetchNanoreview(slug) {
+    const url = `https://nanoreview.net/en/phone/${slug}`;
+    try {
+      const r = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+          "Accept":     "text/html,application/xhtml+xml",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!r.ok) return null;
+      const html = await r.text();
+      // Verificar que es página de un celular real
+      if (!html.includes("AnTuTu") && !html.includes("NanoReview Score")) return null;
+      return html;
+    } catch {
+      return null;
+    }
+  }
+
+  // ── Parsear scores del HTML ───────────────────────────────────────────
+  function parsearScores(html) {
+    let antutu = null;
+    let camara = null;
+
+    // AnTuTu: "AnTuTu Benchmark 11\n\n3323591"
+    let m = html.match(/AnTuTu\s+Benchmark\s+\d+\s*[\r\n\s]+([\d,]+)/i);
+    if (m) {
+      const n = parseInt(m[1].replace(/,/g, ""));
+      if (n > 100000 && n < 5000000) antutu = n;
+    }
+    // AnTuTu fallback: "Total score | 3323591"
+    if (!antutu) {
+      m = html.match(/Total\s+score\s*[|:]\s*([\d,]+)/i);
+      if (m) {
+        const n = parseInt(m[1].replace(/,/g, ""));
+        if (n > 100000 && n < 5000000) antutu = n;
+      }
+    }
+    // AnTuTu fallback 2: número de 6-7 dígitos cerca de "AnTuTu"
+    if (!antutu) {
+      const pos = html.indexOf("AnTuTu");
+      if (pos !== -1) {
+        const frag = html.slice(pos, pos + 500);
+        m = frag.match(/\b(\d{6,7})\b/);
+        if (m) {
+          const n = parseInt(m[1]);
+          if (n > 100000 && n < 5000000) antutu = n;
+        }
+      }
+    }
+
+    // Camera score: "Camera\n\n90" o "Camera\n\n 90*"
+    m = html.match(/Camera\s*[\r\n\s]+(\d{2,3})\*?/i);
+    if (m) {
+      const n = parseInt(m[1]);
+      if (n >= 30 && n <= 100) camara = n;
+    }
+    // Camera fallback: buscar cerca de ">Camera<"
+    if (!camara) {
+      const pos = html.indexOf(">Camera<");
+      if (pos !== -1) {
+        const frag = html.slice(pos, pos + 200);
+        m = frag.match(/\b(\d{2,3})\b/);
+        if (m) {
+          const n = parseInt(m[1]);
+          if (n >= 30 && n <= 100) camara = n;
+        }
+      }
+    }
+
+    return { antutu, dxomark: camara };
+  }
+
+  // ── Intentar cada slug ────────────────────────────────────────────────
+  let html = null;
+  let slugUsado = null;
+
+  for (const slug of [...new Set(slugs)]) {
+    html = await fetchNanoreview(slug);
+    if (html) { slugUsado = slug; break; }
+  }
+
+  if (!html) {
+    return res.json({
+      antutu:   null,
+      dxomark:  null,
+      mensaje:  `No encontrado en Nanoreview. Verificá en: nanoreview.net/en/phone/${slugs[0]}`,
+      slugs_intentados: slugs,
+    });
+  }
+
+  const scores = parsearScores(html);
+  scores.slug = slugUsado;
+  scores.url  = `https://nanoreview.net/en/phone/${slugUsado}`;
+
+  res.json(scores);
+});
+
+
 // ── Inicio servidor ───────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
