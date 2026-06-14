@@ -495,10 +495,6 @@ app.post("/api/scores", async (req, res) => {
     let antutu = null;
     let camara = null;
 
-    // DEBUG — ver fragmento largo de Camera[1]
-    const dbgP = html.indexOf("Camera\n");
-    if (dbgP !== -1) console.log("DEBUG Camera full:", JSON.stringify(html.slice(dbgP, dbgP + 300)));
-
     // AnTuTu: "AnTuTu Benchmark 11\n\n3323591"
     let m = html.match(/AnTuTu\s+Benchmark\s+\d+\s*[\r\n\s]+([\d,]+)/i);
     if (m) {
@@ -526,33 +522,15 @@ app.post("/api/scores", async (req, res) => {
       }
     }
 
-    // Camera score: está en la sección "## Review" como "Camera\n\n 90*"
-    // Hay que saltear el meta description que también tiene "camera"
-    // Buscamos específicamente después de "## Review" o "Review"
-    let htmlReview = html;
-    const posReview = html.indexOf("## Review");
-    if (posReview !== -1) htmlReview = html.slice(posReview, posReview + 600);
-
-    // Buscar "Camera" seguido de saltos de línea y número (con posible espacio y asterisco)
-    m = htmlReview.match(/\bCamera\b[\r\n\s]{1,10}(\d{2,3})\*?/);
-    if (m) {
-      const n = parseInt(m[1]);
-      if (n >= 30 && n <= 100) camara = n;
-    }
-
-    // Fallback: buscar todas las ocurrencias de "Camera" y tomar la que tenga número cerca
-    if (!camara) {
-      let searchFrom = 0;
-      while (true) {
-        const pos = html.indexOf("Camera", searchFrom);
-        if (pos === -1) break;
-        const frag = html.slice(pos, pos + 30);
-        const numMatch = frag.match(/Camera[\r\n\s]{1,5}(\d{2,3})\*?/);
-        if (numMatch) {
-          const n = parseInt(numMatch[1]);
-          if (n >= 30 && n <= 100) { camara = n; break; }
-        }
-        searchFrom = pos + 1;
+    // Camera score: buscar "Camera" seguido del span score-bar-result-square
+    // Estructura: Camera\n\t...<span class="score-bar-result-square">90</span>
+    const posCamera = html.indexOf("Camera\n");
+    if (posCamera !== -1) {
+      const fragCamera = html.slice(posCamera, posCamera + 400);
+      const mSpan = fragCamera.match(/score-bar-result-square[^>]*>(\d{2,3})<\/span>/);
+      if (mSpan) {
+        const n = parseInt(mSpan[1]);
+        if (n >= 30 && n <= 100) camara = n;
       }
     }
 
