@@ -522,17 +522,17 @@ app.post("/api/scores", async (req, res) => {
       }
     }
 
-    // Camera score: "Camera\n\n90" o "Camera\n\n 90*"
-    m = html.match(/Camera\s*[\r\n\s]+(\d{2,3})\*?/i);
+    // Camera score: "Camera\n\n90" o "Camera\n\n 90*" (con espacio y/o asterisco)
+    m = html.match(/Camera\s*[\r\n]+\s*(\d{2,3})\*?/i);
     if (m) {
       const n = parseInt(m[1]);
       if (n >= 30 && n <= 100) camara = n;
     }
-    // Camera fallback: buscar cerca de ">Camera<"
+    // Camera fallback: buscar "Camera" seguido de número en los próximos 50 chars
     if (!camara) {
-      const pos = html.indexOf(">Camera<");
+      const pos = html.search(/Camera\s*[\r\n]/i);
       if (pos !== -1) {
-        const frag = html.slice(pos, pos + 200);
+        const frag = html.slice(pos, pos + 60);
         m = frag.match(/\b(\d{2,3})\b/);
         if (m) {
           const n = parseInt(m[1]);
