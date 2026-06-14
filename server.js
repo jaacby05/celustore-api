@@ -522,9 +522,16 @@ app.post("/api/scores", async (req, res) => {
       }
     }
 
-    // DEBUG — mostrar fragmento entre Display y Performance
-    const dbgReview = html.match(/Display([\s\S]{1,200})Performance/);
-    if (dbgReview) console.log("DEBUG Review section:", JSON.stringify(dbgReview[0].slice(0, 150)));
+    // DEBUG — mostrar 500 chars del HTML donde debería estar el score de cámara
+    // Buscamos cualquier número de 2-3 dígitos que aparezca en el bloque de Review
+    const dbgIdx = html.indexOf("score-bar");
+    if (dbgIdx !== -1) {
+      console.log("DEBUG score-bar fragment:", JSON.stringify(html.slice(dbgIdx - 50, dbgIdx + 200)));
+    } else {
+      console.log("DEBUG: no score-bar found. HTML length:", html.length);
+      // Mostrar los primeros 2000 chars para ver estructura
+      console.log("DEBUG HTML start:", JSON.stringify(html.slice(0, 500)));
+    }
 
     // Camera score — Nanoreview tiene dos estructuras posibles:
     // 1) HTML crudo: <span class="score-bar-result-square">90</span> después de "Camera"
