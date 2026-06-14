@@ -522,18 +522,22 @@ app.post("/api/scores", async (req, res) => {
       }
     }
 
-    // Camera score — estructura exacta de Nanoreview:
-    // <div class="score-bar-name">Camera</div>
-    // <div class="score-bar-result"><span class="score-bar-result-square">90</span></div>
-    // Extraer todos los bloques score-bar y buscar el de Camera
-    const scoreBarRegex = /score-bar-name[^>]*>\s*(\w+)\s*[\s\S]*?score-bar-result-square[^>]*>(\d{2,3})<\/span>/g;
-    let sbMatch;
-    while ((sbMatch = scoreBarRegex.exec(html)) !== null) {
-      const categoria = sbMatch[1].trim().toLowerCase();
-      const valor     = parseInt(sbMatch[2]);
-      if (categoria === 'camera' && valor >= 30 && valor <= 100) {
-        camara = valor;
-        break;
+    // Camera score — cada categoría está en su propio div.score-bar:
+    // <div class="score-bar">
+    //   <div class="score-bar-name">Camera</div>
+    //   <div class="score-bar-result"><span class="score-bar-result-square">90</span></div>
+    // </div>
+    // Extraer cada bloque score-bar completo y buscar el de Camera
+    const bloques = html.matchAll(/<div class="score-bar">([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/g);
+    for (const bloque of bloques) {
+      const contenido = bloque[1];
+      // Verificar que este bloque es el de Camera
+      if (/score-bar-name[^>]*>[\s]*Camera[\s]*<\/div>/i.test(contenido)) {
+        const mVal = contenido.match(/score-bar-result-square[^>]*>(\d{2,3})<\/span>/);
+        if (mVal) {
+          const n = parseInt(mVal[1]);
+          if (n >= 30 && n <= 100) { camara = n; break; }
+        }
       }
     }
 
