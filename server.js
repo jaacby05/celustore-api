@@ -495,12 +495,6 @@ app.post("/api/scores", async (req, res) => {
     let antutu = null;
     let camara = null;
 
-    // DEBUG temporal — borrar después
-    const posCamera = html.search(/Camera/i);
-    if (posCamera !== -1) {
-      console.log("DEBUG Camera fragment:", JSON.stringify(html.slice(posCamera, posCamera + 80)));
-    }
-
     // AnTuTu: "AnTuTu Benchmark 11\n\n3323591"
     let m = html.match(/AnTuTu\s+Benchmark\s+\d+\s*[\r\n\s]+([\d,]+)/i);
     if (m) {
@@ -528,22 +522,33 @@ app.post("/api/scores", async (req, res) => {
       }
     }
 
-    // Camera score: "Camera\n\n90" o "Camera\n\n 90*" (con espacio y/o asterisco)
-    m = html.match(/Camera\s*[\r\n]+\s*(\d{2,3})\*?/i);
+    // Camera score: está en la sección "## Review" como "Camera\n\n 90*"
+    // Hay que saltear el meta description que también tiene "camera"
+    // Buscamos específicamente después de "## Review" o "Review"
+    let htmlReview = html;
+    const posReview = html.indexOf("## Review");
+    if (posReview !== -1) htmlReview = html.slice(posReview, posReview + 600);
+
+    // Buscar "Camera" seguido de saltos de línea y número (con posible espacio y asterisco)
+    m = htmlReview.match(/\bCamera\b[\r\n\s]{1,10}(\d{2,3})\*?/);
     if (m) {
       const n = parseInt(m[1]);
       if (n >= 30 && n <= 100) camara = n;
     }
-    // Camera fallback: buscar "Camera" seguido de número en los próximos 50 chars
+
+    // Fallback: buscar todas las ocurrencias de "Camera" y tomar la que tenga número cerca
     if (!camara) {
-      const pos = html.search(/Camera\s*[\r\n]/i);
-      if (pos !== -1) {
-        const frag = html.slice(pos, pos + 60);
-        m = frag.match(/\b(\d{2,3})\b/);
-        if (m) {
-          const n = parseInt(m[1]);
-          if (n >= 30 && n <= 100) camara = n;
+      let searchFrom = 0;
+      while (true) {
+        const pos = html.indexOf("Camera", searchFrom);
+        if (pos === -1) break;
+        const frag = html.slice(pos, pos + 30);
+        const numMatch = frag.match(/Camera[\r\n\s]{1,5}(\d{2,3})\*?/);
+        if (numMatch) {
+          const n = parseInt(numMatch[1]);
+          if (n >= 30 && n <= 100) { camara = n; break; }
         }
+        searchFrom = pos + 1;
       }
     }
 
