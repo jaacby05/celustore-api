@@ -350,6 +350,94 @@ app.post("/api/recomendar", (req, res) => {
 });
 
 
+// ── GEMINI PROXY ──────────────────────────────────────────────────────────
+
+// POST /api/gemini
+// Recibe el catálogo de productos + historial + mensaje desde chat.php (InfinityFree)
+// y llama a la API de Gemini, devolviendo la respuesta al cliente.
+app.post("/api/gemini", async (req, res) => {
+  try {
+    const { catalogo, historial, mensaje } = req.body;
+
+    if (!mensaje) {
+      return res.status(400).json({ error: "Mensaje vacío" });
+    }
+
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+    if (!GEMINI_API_KEY) {
+      return res.status(500).json({ error: "API key de Gemini no configurada" });
+    }
+
+    const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+
+    const systemPrompt = `Sos el asistente virtual experto de CeluStore, una tienda de celulares y accesorios en Argentina.
+Tu trabajo es ayudar a los clientes a elegir el mejor producto según sus necesidades reales.
+
+REGLAS IMPORTANTES:
+1. Solo podés recomendar productos que estén en el catálogo de abajo. Nunca inventes productos.
+2. Cuando recomiendes un celular, explicá SIEMPRE por qué ese modelo específico le sirve a ESE cliente, basándote en lo que te contó. No des respuestas genéricas.
+3. Si el cliente no te dio suficiente información, hacé UNA sola pregunta puntual para entenderlo mejor. No bombardees con muchas preguntas a la vez.
+4. Al inicio de la conversación, saludá brevemente y hacé 2 preguntas básicas: para qué lo va a usar y cuánto tiene de presupuesto aproximado.
+5. Los precios están en pesos argentinos. Cuando los menciones, usá el formato $X.XXX.XXX.
+6. Si el cliente menciona un uso específico (gaming, fotos, trabajo, redes sociales, etc.), priorizá las specs relevantes para ese uso.
+7. Cuando recomendés un producto, incluí su ID en el formato [ID:XX] al final para que el sistema pueda mostrarlo. Podés recomendar hasta 3 productos.
+8. Sé amigable, directo y usá lenguaje informal (vos, te, etc.) como se habla en Argentina.
+9. Si el cliente pregunta por accesorios, también podés recomendarlos del catálogo.
+10. Si no hay ningún producto que se adapte al presupuesto o necesidad, decilo honestamente.
+
+CATÁLOGO ACTUAL EN STOCK:
+${catalogo || "Sin productos disponibles"}`;
+
+    // Armar contenido para Gemini
+    const contents = [
+      { role: "user",  parts: [{ text: "Instrucciones del sistema:\n" + systemPrompt }] },
+      { role: "model", parts: [{ text: "Entendido. Estoy listo para ayudar a los clientes de CeluStore." }] },
+    ];
+
+    // Agregar historial previo
+    if (Array.isArray(historial)) {
+      historial.forEach((turno) => {
+        contents.push({
+          role:  turno.role === "user" ? "user" : "model",
+          parts: [{ text: turno.text }],
+        });
+      });
+    }
+
+    // Mensaje actual
+    contents.push({ role: "user", parts: [{ text: mensaje }] });
+
+    const geminiRes = await fetch(GEMINI_URL, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({
+        contents,
+        generationConfig: { temperature: 0.7, maxOutputTokens: 800 },
+      }),
+    });
+
+    if (!geminiRes.ok) {
+      const errText = await geminiRes.text();
+      console.error("Error Gemini:", geminiRes.status, errText);
+      return res.status(502).json({ error: "Error al conectar con Gemini: " + geminiRes.status });
+    }
+
+    const data   = await geminiRes.json();
+    const texto  = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+    if (!texto) {
+      return res.status(502).json({ error: "Respuesta vacía de Gemini" });
+    }
+
+    res.json({ respuesta: texto });
+
+  } catch (err) {
+    console.error("Error en /api/gemini:", err);
+    res.status(500).json({ error: "Error interno del servidor" });
+  }
+});
+
+
 // ── Inicio servidor ───────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
