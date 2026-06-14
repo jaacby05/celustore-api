@@ -495,16 +495,9 @@ app.post("/api/scores", async (req, res) => {
     let antutu = null;
     let camara = null;
 
-    // DEBUG — ver fragmento alrededor de cada "Camera" en el HTML
-    let dbgPos = 0;
-    let dbgCount = 0;
-    while (dbgCount < 5) {
-      const p = html.indexOf("Camera", dbgPos);
-      if (p === -1) break;
-      console.log(`DEBUG Camera[${dbgCount}] pos=${p}:`, JSON.stringify(html.slice(p, p + 50)));
-      dbgPos = p + 1;
-      dbgCount++;
-    }
+    // DEBUG — ver fragmento largo de Camera[1]
+    const dbgP = html.indexOf("Camera\n");
+    if (dbgP !== -1) console.log("DEBUG Camera full:", JSON.stringify(html.slice(dbgP, dbgP + 300)));
 
     // AnTuTu: "AnTuTu Benchmark 11\n\n3323591"
     let m = html.match(/AnTuTu\s+Benchmark\s+\d+\s*[\r\n\s]+([\d,]+)/i);
