@@ -495,6 +495,12 @@ app.post("/api/scores", async (req, res) => {
     let antutu = null;
     let camara = null;
 
+    // DEBUG temporal — borrar después
+    const posCamera = html.search(/Camera/i);
+    if (posCamera !== -1) {
+      console.log("DEBUG Camera fragment:", JSON.stringify(html.slice(posCamera, posCamera + 80)));
+    }
+
     // AnTuTu: "AnTuTu Benchmark 11\n\n3323591"
     let m = html.match(/AnTuTu\s+Benchmark\s+\d+\s*[\r\n\s]+([\d,]+)/i);
     if (m) {
