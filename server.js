@@ -350,11 +350,9 @@ app.post("/api/recomendar", (req, res) => {
 });
 
 
-// ── GEMINI PROXY ──────────────────────────────────────────────────────────
-
 // POST /api/gemini
-// Recibe el catálogo de productos + historial + mensaje desde chat.php (InfinityFree)
-// y llama a la API de Gemini, devolviendo la respuesta al cliente.
+// Recibe el catálogo de productos + historial + mensaje desde el frontend
+// y llama a la API de Groq, devolviendo la respuesta al cliente.
 app.post("/api/gemini", async (req, res) => {
   try {
     const { catalogo, historial, mensaje } = req.body;
@@ -363,12 +361,10 @@ app.post("/api/gemini", async (req, res) => {
       return res.status(400).json({ error: "Mensaje vacío" });
     }
 
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    if (!GEMINI_API_KEY) {
-      return res.status(500).json({ error: "API key de Gemini no configurada" });
+    const GROQ_API_KEY = process.env.GROQ_API_KEY;
+    if (!GROQ_API_KEY) {
+      return res.status(500).json({ error: "API key de Groq no configurada" });
     }
-
-    const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
     const systemPrompt = `Sos el asistente virtual experto de CeluStore, una tienda de celulares y accesorios en Argentina.
 Tu trabajo es ayudar a los clientes a elegir el mejor producto según sus necesidades reales.
@@ -388,45 +384,47 @@ REGLAS IMPORTANTES:
 CATÁLOGO ACTUAL EN STOCK:
 ${catalogo || "Sin productos disponibles"}`;
 
-    // Armar contenido para Gemini
-    const contents = [
-      { role: "user",  parts: [{ text: "Instrucciones del sistema:\n" + systemPrompt }] },
-      { role: "model", parts: [{ text: "Entendido. Estoy listo para ayudar a los clientes de CeluStore." }] },
+    // Armar mensajes para Groq (formato OpenAI compatible)
+    const messages = [
+      { role: "system", content: systemPrompt },
     ];
 
-    // Agregar historial previo
     if (Array.isArray(historial)) {
       historial.forEach((turno) => {
-        contents.push({
-          role:  turno.role === "user" ? "user" : "model",
-          parts: [{ text: turno.text }],
+        messages.push({
+          role:    turno.role === "user" ? "user" : "assistant",
+          content: turno.text,
         });
       });
     }
 
-    // Mensaje actual
-    contents.push({ role: "user", parts: [{ text: mensaje }] });
+    messages.push({ role: "user", content: mensaje });
 
-    const geminiRes = await fetch(GEMINI_URL, {
+    const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({
-        contents,
-        generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+      headers: {
+        "Content-Type":  "application/json",
+        "Authorization": `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model:       "llama-3.1-8b-instant",
+        messages,
+        temperature: 0.7,
+        max_tokens:  2048,
       }),
     });
 
-    if (!geminiRes.ok) {
-      const errText = await geminiRes.text();
-      console.error("Error Gemini:", geminiRes.status, errText);
-      return res.status(502).json({ error: "Error al conectar con Gemini: " + geminiRes.status });
+    if (!groqRes.ok) {
+      const errText = await groqRes.text();
+      console.error("Error Groq:", groqRes.status, errText);
+      return res.status(502).json({ error: "Error al conectar con Groq: " + groqRes.status });
     }
 
-    const data   = await geminiRes.json();
-    const texto  = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const data  = await groqRes.json();
+    const texto = data?.choices?.[0]?.message?.content || "";
 
     if (!texto) {
-      return res.status(502).json({ error: "Respuesta vacía de Gemini" });
+      return res.status(502).json({ error: "Respuesta vacía de Groq" });
     }
 
     res.json({ respuesta: texto });
