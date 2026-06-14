@@ -522,58 +522,18 @@ app.post("/api/scores", async (req, res) => {
       }
     }
 
-    // DEBUG — mostrar 500 chars del HTML donde debería estar el score de cámara
-    // Buscamos cualquier número de 2-3 dígitos que aparezca en el bloque de Review
-    const dbgIdx = html.indexOf("score-bar");
-    if (dbgIdx !== -1) {
-      console.log("DEBUG score-bar fragment:", JSON.stringify(html.slice(dbgIdx - 50, dbgIdx + 200)));
-    } else {
-      console.log("DEBUG: no score-bar found. HTML length:", html.length);
-      // Mostrar los primeros 2000 chars para ver estructura
-      console.log("DEBUG HTML start:", JSON.stringify(html.slice(0, 500)));
-    }
-
-    // Camera score — Nanoreview tiene dos estructuras posibles:
-    // 1) HTML crudo: <span class="score-bar-result-square">90</span> después de "Camera"
-    // 2) Texto plano: "Camera\n\n 90*" o "Camera\n\t...\t90"
-
-    // Método 1: span score-bar-result-square justo después de "Camera"
-    // Buscar todas las ocurrencias de "Camera" y tomar la primera que tenga el span cerca
-    {
-      let searchFrom = 0;
-      while (!camara) {
-        const pos = html.indexOf("Camera", searchFrom);
-        if (pos === -1) break;
-        // Solo mirar los siguientes 500 chars
-        const frag = html.slice(pos, pos + 500);
-        // Debe ser "Camera" como etiqueta de categoría, no "camera" en medio de texto largo
-        // Si tiene más de 20 chars sin salto de línea antes del número, es texto corrido → saltar
-        const spanMatch = frag.match(/score-bar-result-square[^>]*>(\d{2,3})<\/span>/);
-        if (spanMatch) {
-          const n = parseInt(spanMatch[1]);
-          if (n >= 30 && n <= 100) { camara = n; break; }
-        }
-        searchFrom = pos + 1;
-      }
-    }
-
-    // Método 2: texto plano "Camera" + saltos/tabs + número de 2-3 dígitos + asterisco opcional
-    if (!camara) {
-      // Buscar "Camera" seguido de whitespace (tabs, newlines) y luego un número de 2-3 dígitos
-      const m2 = html.match(/\bCamera\b[\t\r\n ]{1,20}(\d{2,3})\*?[\t\r\n ]/);
-      if (m2) {
-        const n = parseInt(m2[1]);
-        if (n >= 30 && n <= 100) camara = n;
-      }
-    }
-
-    // Método 3: buscar el patrón de la sección Review completa
-    // "Display\n94\nCamera\n90\nPerformance\n96"
-    if (!camara) {
-      const reviewMatch = html.match(/Display[\s\S]{1,30}?(\d{2,3})[\s\S]{1,5}?Camera[\s\S]{1,30}?(\d{2,3})\*?[\s\S]{1,5}?Performance/);
-      if (reviewMatch) {
-        const n = parseInt(reviewMatch[2]);
-        if (n >= 30 && n <= 100) camara = n;
+    // Camera score — estructura exacta de Nanoreview:
+    // <div class="score-bar-name">Camera</div>
+    // <div class="score-bar-result"><span class="score-bar-result-square">90</span></div>
+    // Extraer todos los bloques score-bar y buscar el de Camera
+    const scoreBarRegex = /score-bar-name[^>]*>\s*(\w+)\s*[\s\S]*?score-bar-result-square[^>]*>(\d{2,3})<\/span>/g;
+    let sbMatch;
+    while ((sbMatch = scoreBarRegex.exec(html)) !== null) {
+      const categoria = sbMatch[1].trim().toLowerCase();
+      const valor     = parseInt(sbMatch[2]);
+      if (categoria === 'camera' && valor >= 30 && valor <= 100) {
+        camara = valor;
+        break;
       }
     }
 
