@@ -538,18 +538,29 @@ app.post("/api/scores", async (req, res) => {
         const frag = html.slice(camMatch.index, camMatch.index + 600);
         const nextName = frag.search(/score-bar-name/i);
         const searchIn = nextName > 20 ? frag.slice(0, nextName) : frag;
-        const mCam = searchIn.match(/score-bar-result-square[^>]*>\s*(\d{2,3})[^<]*<\/span>/i);
-        if (mCam) {
-          const n = parseInt(mCam[1]);
-          if (n >= 20 && n <= 100) camara = n;
+
+        // Caso 1 — score-bar-result-square (Samsung, Vivo, etc.)
+        //   <span class="score-bar-result-square">93</span>
+        const mCam1 = searchIn.match(/score-bar-result-square[^>]*>\s*(\d{2,3})[^<]*<\/span>/i);
+        if (mCam1) {
+          const n = parseInt(mCam1[1]);
+          if (n >= 20 && n <= 100) { camara = n; break; }
+        }
+
+        // Caso 2 — score-bar-result-number-review (Xiaomi, iPhone, etc.)
+        //   <span class="score-bar-result-number-review"> <span style="">90</span>
+        const mCam2 = searchIn.match(/score-bar-result-number-review[^>]*>[\s\S]{0,50}?<span[^>]*>\s*(\d{2,3})\s*<\/span>/i);
+        if (mCam2) {
+          const n = parseInt(mCam2[1]);
+          if (n >= 20 && n <= 100) { camara = n; break; }
         }
       }
     }
-    // Último fallback global
+    // Último fallback global — cualquiera de las dos clases
     if (!camara) {
-      const mCam3 = html.match(/Camera[\s\S]{1,400}?score-bar-result-square[^>]*>\s*(\d{2,3})[^<]*<\/span>/i);
-      if (mCam3) {
-        const n = parseInt(mCam3[1]);
+      const mFallback = html.match(/Camera[\s\S]{1,500}?(?:score-bar-result-square|score-bar-result-number-review)[^>]*>[\s\S]{0,80}?(\d{2,3})[^<]*<\/span>/i);
+      if (mFallback) {
+        const n = parseInt(mFallback[1]);
         if (n >= 20 && n <= 100) camara = n;
       }
     }
