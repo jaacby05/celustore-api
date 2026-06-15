@@ -579,6 +579,23 @@ app.post("/api/scores", async (req, res) => {
   scores.slug = slugUsado;
   scores.url  = `https://nanoreview.net/en/phone/${slugUsado}`;
 
+  // ── DEBUG TEMPORAL ────────────────────────────────────────────────────
+  const camIdx = html.search(/Camera/i);
+  if (camIdx !== -1) {
+    console.log("[DEBUG] HTML alrededor de 'Camera' (300 chars):");
+    console.log(JSON.stringify(html.slice(Math.max(0, camIdx - 100), camIdx + 400)));
+  } else {
+    console.log("[DEBUG] 'Camera' NO encontrado en el HTML");
+  }
+  // Buscar score-bar-result-square cerca de Camera
+  const camBlockIdx = html.search(/>\s*Camera\s*<\/div>/i);
+  if (camBlockIdx !== -1) {
+    console.log("[DEBUG] Bloque Camera tag (600 chars adelante):");
+    console.log(JSON.stringify(html.slice(camBlockIdx, camBlockIdx + 600)));
+  }
+  console.log("[DEBUG] scores resultado:", JSON.stringify(scores));
+  // ─────────────────────────────────────────────────────────────────────
+
   res.json(scores);
 });
 
