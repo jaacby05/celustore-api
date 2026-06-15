@@ -522,40 +522,34 @@ app.post("/api/scores", async (req, res) => {
       }
     }
 
-    // Camera score — estrategia: buscar "Camera" en el HTML y luego
-    // extraer el score-bar-result-square dentro del mismo bloque cercano.
-    // Nanoreview usa divs anidados así:
-    // <div class="score-bar">
-    //   <div class="score-bar-name">Camera</div>
-    //   <div class="score-bar-result">
-    //     <span class="score-bar-result-square">90</span>...
-    //   </div>
-    // </div>
+    // Camera score
+    // Nanoreview puede tener el número con o sin asterisco:
+    //   <span class="score-bar-result-square">90</span>
+    //   <span class="score-bar-result-square">90*</span>  <- score aproximado
     //
-    // Buscamos la posición de >Camera< en el HTML y tomamos un fragmento
-    // hacia adelante para encontrar el número, verificando que no haya
-    // otro score-bar-name en el medio (evitar capturar otro score).
-    const cameraPos = html.search(/>\s*Camera\s*<\/div>/i);
-    if (cameraPos !== -1) {
-      // Tomamos hasta 400 chars adelante del match
-      const frag = html.slice(cameraPos, cameraPos + 400);
-      // Nos aseguramos de que no haya otro score-bar-name antes del número
-      // (para no saltar al siguiente bloque)
-      const nextName = frag.search(/score-bar-name/i);
-      const searchIn = nextName > 0 ? frag.slice(0, nextName) : frag;
-      const mCam = searchIn.match(/score-bar-result-square[^>]*>\s*(\d{2,3})\s*<\/span>/i);
-      if (mCam) {
-        const n = parseInt(mCam[1]);
-        if (n >= 20 && n <= 100) camara = n;
+    // Estrategia: encontrar todas las ocurrencias de ">Camera<" en el HTML,
+    // tomar 600 chars adelante, cortar antes del próximo score-bar-name
+    // (para no mezclar con Gaming u otros scores), y extraer el número.
+    // El regex es permisivo: acepta cualquier char no-< entre el número y </span>.
+    {
+      const re = />\s*Camera\s*<\/div>/gi;
+      let camMatch;
+      while ((camMatch = re.exec(html)) !== null && !camara) {
+        const frag = html.slice(camMatch.index, camMatch.index + 600);
+        const nextName = frag.search(/score-bar-name/i);
+        const searchIn = nextName > 20 ? frag.slice(0, nextName) : frag;
+        const mCam = searchIn.match(/score-bar-result-square[^>]*>\s*(\d{2,3})[^<]*<\/span>/i);
+        if (mCam) {
+          const n = parseInt(mCam[1]);
+          if (n >= 20 && n <= 100) camara = n;
+        }
       }
     }
-
-    // Fallback Camera: buscar patrón directo "Camera" seguido del número
-    // en texto plano (algunos renders de Nanoreview lo muestran así)
+    // Último fallback global
     if (!camara) {
-      const mCam2 = html.match(/Camera\s*<\/div>\s*[\s\S]{0,200}?score-bar-result-square[^>]*>\s*(\d{2,3})\s*<\/span>/i);
-      if (mCam2) {
-        const n = parseInt(mCam2[1]);
+      const mCam3 = html.match(/Camera[\s\S]{1,400}?score-bar-result-square[^>]*>\s*(\d{2,3})[^<]*<\/span>/i);
+      if (mCam3) {
+        const n = parseInt(mCam3[1]);
         if (n >= 20 && n <= 100) camara = n;
       }
     }
