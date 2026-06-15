@@ -366,30 +366,72 @@ app.post("/api/gemini", async (req, res) => {
       return res.status(500).json({ error: "API key de Groq no configurada" });
     }
 
+    // ── Extraer presupuesto del mensaje o historial para filtrarlo en el servidor ──
+    function extraerPresupuesto(textos) {
+      const combined = textos.join(" ");
+      const m = combined.match(/\b(\d{2,4}(?:[.,]\d{3})*)\s*(?:pesos?|peso|\$)?/gi);
+      if (!m) return null;
+      for (const match of m) {
+        const num = parseInt(match.replace(/[.,]/g, "").replace(/[^0-9]/g, ""));
+        if (num >= 50000 && num <= 5000000) return num;
+      }
+      return null;
+    }
+
+    const textosHistorial = Array.isArray(historial) ? historial.map(t => t.text || "") : [];
+    const presupuesto = extraerPresupuesto([mensaje, ...textosHistorial]);
+
+    // ── Filtrar catálogo por presupuesto antes de mandarlo a la IA ──
+    let catalogoFiltrado = catalogo || "";
+    if (presupuesto && catalogoFiltrado) {
+      const lineas = catalogoFiltrado.split("\n");
+      const dentro = [];
+      const fuera  = [];
+      lineas.forEach(linea => {
+        const mPrecio = linea.match(/Precio:\s*\$([\.\d]+)/);
+        if (mPrecio) {
+          const precio = parseInt(mPrecio[1].replace(/\./g, ""));
+          if (precio <= presupuesto) dentro.push(linea);
+          else fuera.push(linea);
+        } else if (linea.trim()) {
+          dentro.push(linea);
+        }
+      });
+      catalogoFiltrado = dentro.join("\n");
+      if (fuera.length > 0) {
+        catalogoFiltrado += `\n\n[PRODUCTOS FUERA DE PRESUPUESTO - NO RECOMENDAR: ${fuera.map(l => l.split("|")[0].trim()).join(", ")}]`;
+      }
+    }
+
     const systemPrompt = `Sos el asistente virtual de CeluStore, una tienda de celulares en Argentina.
 
-REGLA ABSOLUTA #1 - CATALOGO:
-Solo podés recomendar productos que estén EXACTAMENTE en el CATALOGO listado abajo.
-PROHIBIDO mencionar, sugerir o inventar cualquier producto que NO aparezca en ese catalogo.
-Si el cliente pide algo que no existe en el catalogo, decile honestamente que no tenes ese producto.
+REGLA #1 - CATALOGO:
+Solo podés recomendar productos que estén en el CATALOGO listado abajo.
+PROHIBIDO mencionar productos que no aparezcan en ese catalogo.
+Si el cliente pide algo que no existe, decile honestamente que no tenes ese producto.
 Usa UNICAMENTE los nombres, precios y datos que figuran en el catalogo. No inventes especificaciones.
-Si recomendas un producto, los datos que des DEBEN coincidir exactamente con los del catalogo.
 
-REGLA ABSOLUTA #2 - PRESUPUESTO:
-Si el cliente menciona un presupuesto o un precio máximo, SOLO podés recomendar productos cuyo precio sea MENOR O IGUAL a ese presupuesto.
-NUNCA recomiendes un producto que supere el presupuesto indicado, aunque sea "por poco" o "casi entra".
-Si ningún producto entra en el presupuesto, decíselo claramente y mostrá el más cercano por debajo.
-Si hay varios dentro del presupuesto, priorizá el que mejor relación calidad-precio tenga para el uso que describió el cliente.
+REGLA #2 - PRESUPUESTO (CRITICA, NO NEGOCIABLE):
+${presupuesto ? `El cliente tiene un presupuesto de $${presupuesto.toLocaleString("es-AR")} pesos.
+SOLO podés recomendar productos con precio MENOR O IGUAL a $${presupuesto.toLocaleString("es-AR")}.
+Los productos marcados como [PRODUCTOS FUERA DE PRESUPUESTO] tienen precio MAYOR al presupuesto: NUNCA los recomiendes.
+Si no hay productos dentro del presupuesto, decíselo claramente.` : `Si el cliente menciona un presupuesto, SOLO recomendá productos con precio menor o igual a ese monto.`}
+
+REGLA #3 - COMPARACIONES:
+Cuando el cliente pida comparar productos, hacé una tabla clara con los datos reales del catálogo:
+- Precio, Batería (mAh), RAM, Almacenamiento, Cámara (MP), Pantalla, AnTuTu Score, Camera Score
+- Al final destacá cuál es mejor para el uso específico que describió el cliente y por qué.
+- Nunca inventes datos que no estén en el catálogo.
 
 OTRAS REGLAS:
-- Cuando recomiendes un producto del catalogo, explica por que le sirve a ESE cliente segun lo que conto.
-- Si el cliente no dio suficiente info, hace UNA sola pregunta puntual.
-- Los precios estan en pesos argentinos, formato $X.XXX.XXX.
-- Cuando recomiendes, incluí el ID en formato [ID:XX] para que el sistema lo muestre. Hasta 3 productos.
-- Usa lenguaje informal argentino (vos, te, etc.).
+- Explicá por qué cada producto le sirve a ESE cliente según lo que contó.
+- Si falta info, hacé UNA sola pregunta puntual.
+- Precios en pesos argentinos, formato $X.XXX.XXX.
+- Al recomendar incluí [ID:XX] para que el sistema muestre la tarjeta. Hasta 3 productos.
+- Lenguaje informal argentino (vos, te, etc.).
 
-CATALOGO ACTUAL EN STOCK (SOLO ESTOS PRODUCTOS EXISTEN, NO INVENTES OTROS):
-${catalogo || "Sin productos disponibles - informa al cliente que no hay stock."}`;
+CATALOGO ACTUAL EN STOCK:
+${catalogoFiltrado}`;
 
     // Armar mensajes para Groq (formato OpenAI compatible)
     const messages = [
@@ -414,9 +456,9 @@ ${catalogo || "Sin productos disponibles - informa al cliente que no hay stock."
         "Authorization": `Bearer ${GROQ_API_KEY}`,
       },
       body: JSON.stringify({
-        model:       "llama-3.1-8b-instant",
+        model:       "llama-3.3-70b-versatile",
         messages,
-        temperature: 0.7,
+        temperature: 0.4,
         max_tokens:  2048,
       }),
     });
