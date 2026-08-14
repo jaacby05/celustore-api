@@ -4,8 +4,8 @@ const mongoose = require("mongoose");
 const cors     = require("cors");
 
 const app = express();
-app.use(express.json());
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
+app.use(express.json({ type: ["application/json", "text/plain"] }));
 
 // ── Conexión MongoDB Atlas ────────────────────────────────────────────────
 mongoose
@@ -658,6 +658,55 @@ app.post("/api/scores", async (req, res) => {
   res.json(scores);
 });
 
+
+// ═══════════════════════════════════════════════════════════════════════
+// PROXY hacia InfinityFree (MySQL)
+// ═══════════════════════════════════════════════════════════════════════
+// La app NUNCA le habla directo a InfinityFree (lo bloquea porque no
+// viene "de un navegador"). En cambio, le habla a ESTE endpoint, y
+// este servidor (Render) reenvía el pedido servidor-a-servidor, sin
+// pasar por el bloqueo (InfinityFree no distingue esto de cualquier
+// otro tráfico normal de servidor).
+//
+// También reenvía la cookie de sesión de PHP en los dos sentidos, para
+// que el login siga funcionando igual que antes.
+// ═══════════════════════════════════════════════════════════════════════
+const INFINITYFREE_BASE = "https://celustore.66ghz.com/api";
+
+app.all("/api/mysql/*", async (req, res) => {
+  try {
+    const ruta = req.params[0]; // ej: 'auth/login.php'
+    const queryString = req.originalUrl.split("?")[1];
+    const url = `${INFINITYFREE_BASE}/${ruta}${queryString ? "?" + queryString : ""}`;
+
+    const headers = { "Content-Type": "application/json" };
+    if (req.headers.cookie) headers["Cookie"] = req.headers.cookie;
+
+    const opciones = { method: req.method, headers };
+    if (!["GET", "HEAD"].includes(req.method)) {
+      opciones.body = JSON.stringify(req.body || {});
+    }
+
+    const resp = await fetch(url, opciones);
+
+    // Reenviamos la cookie de sesión de PHP, pero sacándole el "Domain"
+    // (así el navegador/WebView la guarda como cookie de ESTE dominio,
+    // ya que la app nunca habla directo con InfinityFree)
+    const setCookie = typeof resp.headers.getSetCookie === "function" ? resp.headers.getSetCookie() : [];
+    if (setCookie.length) {
+      const reescritas = setCookie.map((c) => c.replace(/;\s*Domain=[^;]+/i, ""));
+      res.setHeader("Set-Cookie", reescritas);
+    }
+
+    const texto = await resp.text();
+    res.status(resp.status);
+    res.type("application/json");
+    res.send(texto);
+  } catch (e) {
+    console.error("Error en proxy MySQL:", e);
+    res.status(502).json({ error: "No se pudo conectar con el servidor de datos: " + e.message });
+  }
+});
 
 // ── Inicio servidor ───────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
