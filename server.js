@@ -67,6 +67,162 @@ const articuloSchema = new mongoose.Schema(
 );
 const Articulo = mongoose.model("Articulo", articuloSchema, "articulos_proveedores");
 
+// ── Schema Usuario (solo para la APK) ─────────────────────────────────────
+const usuarioSchema = new mongoose.Schema(
+  {
+    nombre:   { type: String, required: true },
+    email:    { type: String, required: true, unique: true },
+    password: { type: String, required: true },
+    rol:      { type: String, default: "admin" },
+  },
+  { timestamps: true }
+);
+const Usuario = mongoose.model("Usuario", usuarioSchema, "usuarios_app");
+
+// ── Schema Carrito (movimientos hechos desde la APK) ──────────────────────
+const carritoMovilSchema = new mongoose.Schema(
+  {
+    producto_id:     { type: String, required: true },
+    producto_nombre: { type: String, required: true },
+    cantidad:        { type: Number, required: true, min: 1 },
+    precio:          { type: Number, default: 0 },
+    usuario_email:   { type: String, required: true },
+  },
+  { timestamps: true }
+);
+const CarritoMovil = mongoose.model("CarritoMovil", carritoMovilSchema, "carrito_movil");
+
+// ── Schema Órdenes (compras hechas desde la APK) ───────────────────────────
+const ordenMovilSchema = new mongoose.Schema(
+  {
+    usuario_email:    { type: String, required: true },
+    domicilio_envio:  { type: String, required: true },
+    telefono_contacto:{ type: String, required: true },
+    tipo_envio:       { type: String, default: "estandar" },
+    metodo_pago:      { type: String, default: "tarjeta" },
+    costo_envio:      { type: Number, default: 0 },
+    numero_orden:     { type: String, required: true },
+    estado:           { type: String, default: "pendiente" },
+  },
+  { timestamps: true }
+);
+const OrdenMovil = mongoose.model("OrdenMovil", ordenMovilSchema, "ordenes_movil");
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// RUTAS PARA LA APK (todo contra MongoDB — sin pasar por InfinityFree)
+// ════════════════════════════════════════════════════════════════════════════
+
+// POST /api/app/login
+app.post("/api/app/login", async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      return res.json({ error: "Email y contraseña son obligatorios" });
+    }
+    const usuario = await Usuario.findOne({ email: email.trim(), password: password.trim() });
+    if (!usuario) {
+      return res.json({ error: "Email o contraseña incorrectos" });
+    }
+    res.json({
+      success: true,
+      usuario: { id: usuario._id, nombre: usuario.nombre, email: usuario.email, rol: usuario.rol },
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/app/productos — reusa la colección articulos_proveedores como catálogo
+app.get("/api/app/productos", async (req, res) => {
+  try {
+    const articulos = await Articulo.find({ tipo: "celular" }).sort({ createdAt: -1 });
+    const productos = articulos.map((a) => ({
+      id:     a._id,
+      nombre: `${a.marca} ${a.modelo}`.trim(),
+      marca:  a.marca,
+      precio: a.precio,
+      stock:  a.cantidad,
+      imagen: "",
+    }));
+    res.json({ productos });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/app/productos/:id
+app.get("/api/app/productos/:id", async (req, res) => {
+  try {
+    const a = await Articulo.findById(req.params.id);
+    if (!a) return res.json({ error: "Producto no encontrado" });
+    res.json({
+      producto: {
+        id: a._id, nombre: `${a.marca} ${a.modelo}`.trim(), marca: a.marca,
+        precio: a.precio, stock: a.cantidad, imagen: "",
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/app/carrito — agregar un producto (esto es lo que la app encola si no hay red)
+app.post("/api/app/carrito", async (req, res) => {
+  try {
+    const { producto_id, producto_nombre, cantidad, precio, usuario_email } = req.body || {};
+    if (!producto_id || !cantidad || !usuario_email) {
+      return res.json({ error: "Faltan datos para agregar al carrito" });
+    }
+    const item = await CarritoMovil.create({ producto_id, producto_nombre, cantidad, precio, usuario_email });
+    res.json({ success: true, mensaje: "Agregado al carrito", item });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/app/carrito?usuario_email=...
+app.get("/api/app/carrito", async (req, res) => {
+  try {
+    const filtro = req.query.usuario_email ? { usuario_email: req.query.usuario_email } : {};
+    const items = await CarritoMovil.find(filtro).sort({ createdAt: -1 });
+    res.json({ items });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/app/ordenes — checkout
+app.post("/api/app/ordenes", async (req, res) => {
+  try {
+    const datos = req.body || {};
+    if (!datos.usuario_email || !datos.domicilio_envio) {
+      return res.json({ error: "Faltan datos para crear la orden" });
+    }
+    const numero_orden = "ORD-" + Date.now();
+    const orden = await OrdenMovil.create({ ...datos, numero_orden });
+    // Al confirmar la orden, vaciamos el carrito de ese usuario
+    await CarritoMovil.deleteMany({ usuario_email: datos.usuario_email });
+    res.json({ success: true, numero_orden, orden });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/app/ordenes?usuario_email=...
+app.get("/api/app/ordenes", async (req, res) => {
+  try {
+    const filtro = req.query.usuario_email ? { usuario_email: req.query.usuario_email } : {};
+    const ordenes = await OrdenMovil.find(filtro).sort({ createdAt: -1 });
+    const mapeadas = ordenes.map((o) => ({
+      numero_orden: o.numero_orden, estado: o.estado, fecha: o.createdAt,
+      total: o.costo_envio || 0,
+    }));
+    res.json({ ordenes: mapeadas });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // ════════════════════════════════════════════════════════════════════════════
 // RUTAS
