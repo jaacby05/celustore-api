@@ -687,7 +687,21 @@ app.all("/api/mysql/*", async (req, res) => {
       opciones.body = JSON.stringify(req.body || {});
     }
 
-    const resp = await fetch(url, opciones);
+    // Timeout explícito: si InfinityFree no responde en 25s, cortamos
+    // (mejor un error claro que dejar la petición colgada para siempre)
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 25000);
+    opciones.signal = controller.signal;
+
+    let resp;
+    try {
+      resp = await fetch(url, opciones);
+    } catch (e) {
+      clearTimeout(timer);
+      const motivo = e.name === "AbortError" ? "InfinityFree no respondió a tiempo (timeout)" : e.message;
+      return res.status(502).json({ error: "No se pudo conectar con InfinityFree: " + motivo });
+    }
+    clearTimeout(timer);
 
     // Reenviamos la cookie de sesión de PHP, pero sacándole el "Domain"
     // (así el navegador/WebView la guarda como cookie de ESTE dominio,
@@ -699,6 +713,20 @@ app.all("/api/mysql/*", async (req, res) => {
     }
 
     const texto = await resp.text();
+
+    // Si InfinityFree (o algo en el medio) no devolvió JSON, no lo
+    // mandamos como si lo fuera — eso rompe la app en silencio.
+    let esJsonValido = true;
+    try { JSON.parse(texto); } catch { esJsonValido = false; }
+
+    if (!esJsonValido) {
+      console.error("InfinityFree devolvió algo que no es JSON:", texto.slice(0, 300));
+      return res.status(502).json({
+        error: "InfinityFree devolvió una respuesta inesperada (no-JSON). Puede ser un bloqueo temporal del hosting.",
+        _statusOriginal: resp.status,
+      });
+    }
+
     res.status(resp.status);
     res.type("application/json");
     res.send(texto);
