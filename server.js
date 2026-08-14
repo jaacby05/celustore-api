@@ -679,7 +679,13 @@ app.all("/api/mysql/*", async (req, res) => {
     const queryString = req.originalUrl.split("?")[1];
     const url = `${INFINITYFREE_BASE}/${ruta}${queryString ? "?" + queryString : ""}`;
 
-    const headers = { "Content-Type": "application/json" };
+    const headers = {
+      "Content-Type": "application/json",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+      "Accept": "application/json, text/plain, */*",
+      "Accept-Language": "es-AR,es;q=0.9,en;q=0.8",
+      "Referer": "https://celustore.66ghz.com/",
+    };
     if (req.headers.cookie) headers["Cookie"] = req.headers.cookie;
 
     const opciones = { method: req.method, headers };
