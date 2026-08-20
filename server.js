@@ -108,6 +108,38 @@ const ordenMovilSchema = new mongoose.Schema(
 );
 const OrdenMovil = mongoose.model("OrdenMovil", ordenMovilSchema, "ordenes_movil");
 
+// ── Schema Carrito Mayorista (separado del carrito normal) ────────────────
+const carritoMayoristaSchema = new mongoose.Schema(
+  {
+    producto_id:      { type: String, required: true },
+    producto_nombre:  { type: String, required: true },
+    cantidad:         { type: Number, required: true },
+    precio_unitario:  { type: Number, required: true }, // ya con el descuento aplicado
+    usuario_email:    { type: String, required: true },
+  },
+  { timestamps: true }
+);
+const CarritoMayorista = mongoose.model("CarritoMayorista", carritoMayoristaSchema, "carrito_mayorista");
+
+// ── Schema Órdenes Mayoristas (separadas de las órdenes normales) ─────────
+const ordenMayoristaSchema = new mongoose.Schema(
+  {
+    usuario_email:     { type: String, required: true },
+    domicilio_envio:   { type: String, required: true },
+    telefono_contacto: { type: String, required: true },
+    metodo_pago:       { type: String, default: "transferencia" },
+    numero_orden:      { type: String, required: true },
+    estado:            { type: String, default: "pendiente" },
+    total:             { type: Number, default: 0 },
+  },
+  { timestamps: true }
+);
+const OrdenMayorista = mongoose.model("OrdenMayorista", ordenMayoristaSchema, "ordenes_mayoristas");
+
+// ── Configuración del modo mayorista ───────────────────────────────────────
+const DESCUENTO_MAYORISTA = 0.15;     // 15% menos que el precio normal
+const CANTIDAD_MINIMA_MAYORISTA = 10; // unidades mínimas por producto
+
 
 // ════════════════════════════════════════════════════════════════════════════
 // RUTAS PARA LA APK (todo contra MongoDB — sin pasar por InfinityFree)
@@ -217,6 +249,91 @@ app.get("/api/app/ordenes", async (req, res) => {
     const mapeadas = ordenes.map((o) => ({
       numero_orden: o.numero_orden, estado: o.estado, fecha: o.createdAt,
       total: o.costo_envio || 0,
+    }));
+    res.json({ ordenes: mapeadas });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// RUTAS MAYORISTAS — "caja aparte" de la compra normal, mismos productos
+// pero con precio con descuento y cantidad mínima por producto
+// ════════════════════════════════════════════════════════════════════════════
+
+// GET /api/app/productos-mayorista
+app.get("/api/app/productos-mayorista", async (req, res) => {
+  try {
+    const articulos = await Articulo.find({ tipo: "celular" }).sort({ createdAt: -1 });
+    const productos = articulos.map((a) => ({
+      id: a._id,
+      nombre: `${a.marca} ${a.modelo}`.trim(),
+      marca: a.marca,
+      precio_normal: a.precio,
+      precio_mayorista: Math.round(a.precio * (1 - DESCUENTO_MAYORISTA)),
+      cantidad_minima: CANTIDAD_MINIMA_MAYORISTA,
+      stock: a.cantidad,
+      imagen: "",
+    }));
+    res.json({ productos, descuento: DESCUENTO_MAYORISTA, cantidad_minima: CANTIDAD_MINIMA_MAYORISTA });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/app/carrito-mayorista
+app.post("/api/app/carrito-mayorista", async (req, res) => {
+  try {
+    const { producto_id, producto_nombre, cantidad, precio_unitario, usuario_email } = req.body || {};
+    if (!producto_id || !cantidad || !usuario_email) {
+      return res.json({ error: "Faltan datos para agregar al carrito mayorista" });
+    }
+    if (Number(cantidad) < CANTIDAD_MINIMA_MAYORISTA) {
+      return res.json({ error: `La cantidad mínima para compra mayorista es ${CANTIDAD_MINIMA_MAYORISTA} unidades` });
+    }
+    const item = await CarritoMayorista.create({ producto_id, producto_nombre, cantidad, precio_unitario, usuario_email });
+    res.json({ success: true, mensaje: "Agregado al carrito mayorista", item });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/app/carrito-mayorista?usuario_email=...
+app.get("/api/app/carrito-mayorista", async (req, res) => {
+  try {
+    const filtro = req.query.usuario_email ? { usuario_email: req.query.usuario_email } : {};
+    const items = await CarritoMayorista.find(filtro).sort({ createdAt: -1 });
+    res.json({ items });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/app/ordenes-mayoristas — checkout mayorista
+app.post("/api/app/ordenes-mayoristas", async (req, res) => {
+  try {
+    const datos = req.body || {};
+    if (!datos.usuario_email || !datos.domicilio_envio) {
+      return res.json({ error: "Faltan datos para crear la orden mayorista" });
+    }
+    const itemsCarrito = await CarritoMayorista.find({ usuario_email: datos.usuario_email });
+    const total = itemsCarrito.reduce((s, i) => s + i.precio_unitario * i.cantidad, 0);
+    const numero_orden = "MAY-" + Date.now();
+    const orden = await OrdenMayorista.create({ ...datos, numero_orden, total });
+    await CarritoMayorista.deleteMany({ usuario_email: datos.usuario_email });
+    res.json({ success: true, numero_orden, orden });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/app/ordenes-mayoristas?usuario_email=...
+app.get("/api/app/ordenes-mayoristas", async (req, res) => {
+  try {
+    const filtro = req.query.usuario_email ? { usuario_email: req.query.usuario_email } : {};
+    const ordenes = await OrdenMayorista.find(filtro).sort({ createdAt: -1 });
+    const mapeadas = ordenes.map((o) => ({
+      numero_orden: o.numero_orden, estado: o.estado, fecha: o.createdAt, total: o.total,
     }));
     res.json({ ordenes: mapeadas });
   } catch (e) {
