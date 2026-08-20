@@ -156,6 +156,9 @@ app.post("/api/app/login", async (req, res) => {
     if (!usuario) {
       return res.json({ error: "Email o contraseña incorrectos" });
     }
+    if (usuario.rol !== "cliente") {
+      return res.json({ error: "Esta app es solo para cuentas de cliente" });
+    }
     res.json({
       success: true,
       usuario: { id: usuario._id, nombre: usuario.nombre, email: usuario.email, rol: usuario.rol },
