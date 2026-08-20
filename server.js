@@ -259,6 +259,28 @@ app.get("/api/app/ordenes", async (req, res) => {
   }
 });
 
+// POST /api/app/sync-usuario — la web llama esto (desde el navegador del
+// que se registra) justo después de verificar su cuenta, para replicar
+// el usuario en Mongo y que ya pueda usar la app. El rol siempre se
+// fuerza a "cliente" acá, sin importar qué mande el pedido, para que
+// nadie pueda crearse una cuenta admin llamando a este endpoint directo.
+app.post("/api/app/sync-usuario", async (req, res) => {
+  try {
+    const { nombre, email, password } = req.body || {};
+    if (!nombre || !email || !password) {
+      return res.json({ error: "Faltan datos para sincronizar el usuario" });
+    }
+    await Usuario.findOneAndUpdate(
+      { email: email.trim() },
+      { nombre, email: email.trim(), password, rol: "cliente" },
+      { upsert: true, new: true }
+    );
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // RUTAS MAYORISTAS — "caja aparte" de la compra normal, mismos productos
 // pero con precio con descuento y cantidad mínima por producto
