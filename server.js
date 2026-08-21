@@ -136,6 +136,18 @@ const ordenMayoristaSchema = new mongoose.Schema(
 );
 const OrdenMayorista = mongoose.model("OrdenMayorista", ordenMayoristaSchema, "ordenes_mayoristas");
 
+// ── Schema Caja Mayorista (ingresos/egresos, separado de la caja normal) ──
+const cajaMayoristaSchema = new mongoose.Schema(
+  {
+    tipo:        { type: String, enum: ["ingreso", "egreso"], required: true },
+    categoria:   { type: String, required: true }, // 'venta_mayorista', 'mercaderia', 'envio', 'otro'
+    descripcion: { type: String, required: true },
+    monto:       { type: Number, required: true },
+  },
+  { timestamps: true }
+);
+const CajaMayorista = mongoose.model("CajaMayorista", cajaMayoristaSchema, "caja_mayorista");
+
 // ── Configuración del modo mayorista ───────────────────────────────────────
 const DESCUENTO_MAYORISTA = 0.15;     // 15% menos que el precio normal
 const CANTIDAD_MINIMA_MAYORISTA = 10; // unidades mínimas por producto
@@ -346,6 +358,17 @@ app.post("/api/app/ordenes-mayoristas", async (req, res) => {
     const numero_orden = "MAY-" + Date.now();
     const orden = await OrdenMayorista.create({ ...datos, numero_orden, total });
     await CarritoMayorista.deleteMany({ usuario_email: datos.usuario_email });
+
+    // Registrar el ingreso automáticamente en la caja mayorista
+    if (total > 0) {
+      await CajaMayorista.create({
+        tipo: "ingreso",
+        categoria: "venta_mayorista",
+        descripcion: `Venta mayorista - Pedido ${numero_orden}`,
+        monto: total,
+      });
+    }
+
     res.json({ success: true, numero_orden, orden });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -366,9 +389,42 @@ app.get("/api/app/ordenes-mayoristas", async (req, res) => {
   }
 });
 
-// ════════════════════════════════════════════════════════════════════════════
-// RUTAS
-// ════════════════════════════════════════════════════════════════════════════
+// ── ADMIN: Caja Mayorista ───────────────────────────────────────────────
+// GET /api/app/admin/caja-mayorista — resumen + historial completo
+app.get("/api/app/admin/caja-mayorista", async (req, res) => {
+  try {
+    const movimientos = await CajaMayorista.find().sort({ createdAt: -1 });
+    const total_ingresos = movimientos.filter(m => m.tipo === "ingreso").reduce((s, m) => s + m.monto, 0);
+    const total_egresos = movimientos.filter(m => m.tipo === "egreso").reduce((s, m) => s + m.monto, 0);
+    res.json({
+      success: true,
+      saldo: total_ingresos - total_egresos,
+      total_ingresos,
+      total_egresos,
+      movimientos: movimientos.map(m => ({
+        tipo: m.tipo, categoria: m.categoria, descripcion: m.descripcion,
+        monto: m.monto, fecha: m.createdAt,
+      })),
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/app/admin/caja-mayorista — registrar un egreso manual
+app.post("/api/app/admin/caja-mayorista", async (req, res) => {
+  try {
+    const { categoria, monto, descripcion } = req.body || {};
+    if (!monto || monto <= 0) return res.json({ error: "Ingresá un monto válido" });
+    if (!descripcion) return res.json({ error: "Ingresá una descripción" });
+    await CajaMayorista.create({ tipo: "egreso", categoria: categoria || "otro", descripcion, monto });
+    res.json({ success: true, mensaje: "Egreso registrado correctamente" });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
 
 // GET /health
 app.get("/health", (req, res) => {
