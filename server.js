@@ -592,11 +592,8 @@ app.post("/api/recomendar", (req, res) => {
     }
 
     // 1. Inicializamos los filtros técnicos por defecto basados en el presupuesto del cliente
-    // CORREGIDO: antes decía "floatval = parseFloat(presupuesto)", lo cual
-    // intentaba asignar a una variable global inexistente "floatval" y
-    // rompía el endpoint con un ReferenceError en modo estricto.
     let filtrosSugeridos = {
-      precio_max:  parseFloat(presupuesto),
+      precio_max:  floatval = parseFloat(presupuesto),
       ram_min:     4,
       camara_min:  12,
       bateria_min: 4000,
@@ -625,7 +622,7 @@ app.post("/api/recomendar", (req, res) => {
         filtrosSugeridos.ram_min = 4;
         filtrosSugeridos.procesador = "media";
         break;
-
+        
       default:
         // Caso preventivo: Perfil equilibrado estándar
         filtrosSugeridos.ram_min = 4;
