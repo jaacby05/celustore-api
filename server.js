@@ -1040,6 +1040,13 @@ app.all("/api/mysql/*", async (req, res) => {
   }
 });
 
+// GET /health — endpoint liviano para el ping externo (cron-job.org) que
+// mantiene despierta la API en Render. No toca la base de datos, así
+// que es lo más barato posible para pegarle cada 10 minutos.
+app.get("/health", (req, res) => {
+  res.json({ ok: true, hora: new Date().toISOString() });
+});
+
 // ── Inicio servidor ───────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
