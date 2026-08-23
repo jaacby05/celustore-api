@@ -148,6 +148,35 @@ const cajaMayoristaSchema = new mongoose.Schema(
 );
 const CajaMayorista = mongoose.model("CajaMayorista", cajaMayoristaSchema, "caja_mayorista");
 
+// ── Schema Producto (copia del catálogo REAL de MySQL, sincronizada
+//    automáticamente desde admin/productos.php cada vez que se
+//    crea/edita/borra un producto en la web) ───────────────────────────────
+const productoAppSchema = new mongoose.Schema(
+  {
+    id_mysql: { type: Number, required: true, unique: true }, // id real en la tabla `productos`
+    nombre:   { type: String, required: true },
+    marca:    { type: String, default: "" },
+    precio:   { type: Number, required: true },
+    stock:    { type: Number, default: 0 },
+    imagen:   { type: String, default: "" },
+    activo:   { type: Boolean, default: true },
+  },
+  { timestamps: true }
+);
+const ProductoApp = mongoose.model("ProductoApp", productoAppSchema, "productos_app");
+
+// ── Schema Stock Pendiente (compras mayoristas desde la app que
+//    todavía no se descontaron del stock real en MySQL) ───────────────────
+const stockPendienteSchema = new mongoose.Schema(
+  {
+    id_mysql: { type: Number, required: true },
+    cantidad: { type: Number, required: true },
+    aplicado: { type: Boolean, default: false },
+  },
+  { timestamps: true }
+);
+const StockPendiente = mongoose.model("StockPendiente", stockPendienteSchema, "stock_pendiente_mayorista");
+
 // ── Configuración del modo mayorista ───────────────────────────────────────
 const DESCUENTO_MAYORISTA = 0.15;     // 15% menos que el precio normal
 const CANTIDAD_MINIMA_MAYORISTA = 10; // unidades mínimas por producto
@@ -180,33 +209,30 @@ app.post("/api/app/login", async (req, res) => {
   }
 });
 
-// GET /api/app/productos — reusa la colección articulos_proveedores como catálogo
+// GET /api/app/productos — catálogo REAL, sincronizado desde MySQL
 app.get("/api/app/productos", async (req, res) => {
   try {
-    const articulos = await Articulo.find({ tipo: "celular" }).sort({ createdAt: -1 });
-    const productos = articulos.map((a) => ({
-      id:     a._id,
-      nombre: `${a.marca} ${a.modelo}`.trim(),
-      marca:  a.marca,
-      precio: a.precio,
-      stock:  a.cantidad,
-      imagen: "",
-    }));
-    res.json({ productos });
+    const productos = await ProductoApp.find({ activo: true }).sort({ createdAt: -1 });
+    res.json({
+      productos: productos.map((p) => ({
+        id: p.id_mysql, nombre: p.nombre, marca: p.marca,
+        precio: p.precio, stock: p.stock, imagen: p.imagen,
+      })),
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// GET /api/app/productos/:id
+// GET /api/app/productos/:id — :id acá es el id_mysql (el mismo que en la web)
 app.get("/api/app/productos/:id", async (req, res) => {
   try {
-    const a = await Articulo.findById(req.params.id);
-    if (!a) return res.json({ error: "Producto no encontrado" });
+    const p = await ProductoApp.findOne({ id_mysql: req.params.id, activo: true });
+    if (!p) return res.json({ error: "Producto no encontrado" });
     res.json({
       producto: {
-        id: a._id, nombre: `${a.marca} ${a.modelo}`.trim(), marca: a.marca,
-        precio: a.precio, stock: a.cantidad, imagen: "",
+        id: p.id_mysql, nombre: p.nombre, marca: p.marca,
+        precio: p.precio, stock: p.stock, imagen: p.imagen,
       },
     });
   } catch (e) {
@@ -294,6 +320,79 @@ app.post("/api/app/sync-usuario", async (req, res) => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════
+// SINCRONIZACIÓN DEL CATÁLOGO REAL (llamado por PHP vía cURL desde
+// admin/productos.php, cada vez que se crea/edita/borra un producto)
+// ════════════════════════════════════════════════════════════════════════════
+
+// POST /api/app/sync-producto — crear o actualizar (upsert por id_mysql)
+app.post("/api/app/sync-producto", async (req, res) => {
+  try {
+    const { id_mysql, nombre, marca, precio, stock, imagen, activo } = req.body || {};
+    if (!id_mysql || !nombre) {
+      return res.json({ error: "Faltan datos para sincronizar el producto" });
+    }
+    await ProductoApp.findOneAndUpdate(
+      { id_mysql },
+      { id_mysql, nombre, marca: marca || "", precio: precio || 0, stock: stock || 0,
+        imagen: imagen || "", activo: activo !== false },
+      { upsert: true, new: true }
+    );
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/app/sync-producto-eliminar — borrar (o desactivar) del catálogo
+app.post("/api/app/sync-producto-eliminar", async (req, res) => {
+  try {
+    const { id_mysql, definitivo } = req.body || {};
+    if (!id_mysql) return res.json({ error: "Falta id_mysql" });
+    if (definitivo) {
+      await ProductoApp.deleteOne({ id_mysql });
+    } else {
+      await ProductoApp.findOneAndUpdate({ id_mysql }, { activo: false });
+    }
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// STOCK PENDIENTE (compras mayoristas de la app, pendientes de descontar
+// del stock real en MySQL — se aplican vía cURL desde la web, ver
+// config/sync-stock-mayorista.php)
+// ════════════════════════════════════════════════════════════════════════════
+
+// GET /api/app/admin/stock-pendiente — lo que falta descontar
+app.get("/api/app/admin/stock-pendiente", async (req, res) => {
+  try {
+    const pendientes = await StockPendiente.find({ aplicado: false });
+    res.json({
+      success: true,
+      pendientes: pendientes.map(p => ({ id: p._id, id_mysql: p.id_mysql, cantidad: p.cantidad })),
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/app/admin/stock-pendiente/aplicar — marcar como ya descontados
+app.post("/api/app/admin/stock-pendiente/aplicar", async (req, res) => {
+  try {
+    const { ids } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.json({ error: "Faltan ids" });
+    }
+    await StockPendiente.updateMany({ _id: { $in: ids } }, { aplicado: true });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 // RUTAS MAYORISTAS — "caja aparte" de la compra normal, mismos productos
 // pero con precio con descuento y cantidad mínima por producto
 // ════════════════════════════════════════════════════════════════════════════
@@ -301,18 +400,18 @@ app.post("/api/app/sync-usuario", async (req, res) => {
 // GET /api/app/productos-mayorista
 app.get("/api/app/productos-mayorista", async (req, res) => {
   try {
-    const articulos = await Articulo.find({ tipo: "celular" }).sort({ createdAt: -1 });
-    const productos = articulos.map((a) => ({
-      id: a._id,
-      nombre: `${a.marca} ${a.modelo}`.trim(),
-      marca: a.marca,
-      precio_normal: a.precio,
-      precio_mayorista: Math.round(a.precio * (1 - DESCUENTO_MAYORISTA)),
+    const productos = await ProductoApp.find({ activo: true }).sort({ createdAt: -1 });
+    res.json({
+      productos: productos.map((p) => ({
+        id: p.id_mysql, nombre: p.nombre, marca: p.marca,
+        precio_normal: p.precio,
+        precio_mayorista: Math.round(p.precio * (1 - DESCUENTO_MAYORISTA)),
+        cantidad_minima: CANTIDAD_MINIMA_MAYORISTA,
+        stock: p.stock, imagen: p.imagen,
+      })),
+      descuento: DESCUENTO_MAYORISTA,
       cantidad_minima: CANTIDAD_MINIMA_MAYORISTA,
-      stock: a.cantidad,
-      imagen: "",
-    }));
-    res.json({ productos, descuento: DESCUENTO_MAYORISTA, cantidad_minima: CANTIDAD_MINIMA_MAYORISTA });
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -357,6 +456,17 @@ app.post("/api/app/ordenes-mayoristas", async (req, res) => {
     const total = itemsCarrito.reduce((s, i) => s + i.precio_unitario * i.cantidad, 0);
     const numero_orden = "MAY-" + Date.now();
     const orden = await OrdenMayorista.create({ ...datos, numero_orden, total });
+
+    // Anotar el stock que hay que descontar en MySQL (se aplica solo
+    // cuando alguien visite la web, vía cURL desde PHP — ver
+    // config/sync-stock-mayorista.php)
+    for (const item of itemsCarrito) {
+      const idNum = Number(item.producto_id);
+      if (!isNaN(idNum)) {
+        await StockPendiente.create({ id_mysql: idNum, cantidad: item.cantidad });
+      }
+    }
+
     await CarritoMayorista.deleteMany({ usuario_email: datos.usuario_email });
 
     // Registrar el ingreso automáticamente en la caja mayorista
