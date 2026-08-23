@@ -265,6 +265,18 @@ app.get("/api/app/carrito", async (req, res) => {
   }
 });
 
+// POST /api/app/carrito-eliminar — sacar un ítem del carrito
+app.post("/api/app/carrito-eliminar", async (req, res) => {
+  try {
+    const { id } = req.body || {};
+    if (!id) return res.json({ error: "Falta el id del ítem" });
+    await CarritoMovil.deleteOne({ _id: id });
+    res.json({ success: true, mensaje: "Producto eliminado del carrito" });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/app/ordenes — checkout
 app.post("/api/app/ordenes", async (req, res) => {
   try {
