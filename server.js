@@ -84,6 +84,7 @@ const carritoMovilSchema = new mongoose.Schema(
   {
     producto_id:     { type: String, required: true },
     producto_nombre: { type: String, required: true },
+    imagen:          { type: String, default: "" },
     cantidad:        { type: Number, required: true, min: 1 },
     precio:          { type: Number, default: 0 },
     usuario_email:   { type: String, required: true },
@@ -113,6 +114,7 @@ const carritoMayoristaSchema = new mongoose.Schema(
   {
     producto_id:      { type: String, required: true },
     producto_nombre:  { type: String, required: true },
+    imagen:           { type: String, default: "" },
     cantidad:         { type: Number, required: true },
     precio_unitario:  { type: Number, required: true }, // ya con el descuento aplicado
     usuario_email:    { type: String, required: true },
@@ -243,11 +245,11 @@ app.get("/api/app/productos/:id", async (req, res) => {
 // POST /api/app/carrito — agregar un producto (esto es lo que la app encola si no hay red)
 app.post("/api/app/carrito", async (req, res) => {
   try {
-    const { producto_id, producto_nombre, cantidad, precio, usuario_email } = req.body || {};
+    const { producto_id, producto_nombre, cantidad, precio, usuario_email, imagen } = req.body || {};
     if (!producto_id || !cantidad || !usuario_email) {
       return res.json({ error: "Faltan datos para agregar al carrito" });
     }
-    const item = await CarritoMovil.create({ producto_id, producto_nombre, cantidad, precio, usuario_email });
+    const item = await CarritoMovil.create({ producto_id, producto_nombre, cantidad, precio, usuario_email, imagen });
     res.json({ success: true, mensaje: "Agregado al carrito", item });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -432,14 +434,14 @@ app.get("/api/app/productos-mayorista", async (req, res) => {
 // POST /api/app/carrito-mayorista
 app.post("/api/app/carrito-mayorista", async (req, res) => {
   try {
-    const { producto_id, producto_nombre, cantidad, precio_unitario, usuario_email } = req.body || {};
+    const { producto_id, producto_nombre, cantidad, precio_unitario, usuario_email, imagen } = req.body || {};
     if (!producto_id || !cantidad || !usuario_email) {
       return res.json({ error: "Faltan datos para agregar al carrito mayorista" });
     }
     if (Number(cantidad) < CANTIDAD_MINIMA_MAYORISTA) {
       return res.json({ error: `La cantidad mínima para compra mayorista es ${CANTIDAD_MINIMA_MAYORISTA} unidades` });
     }
-    const item = await CarritoMayorista.create({ producto_id, producto_nombre, cantidad, precio_unitario, usuario_email });
+    const item = await CarritoMayorista.create({ producto_id, producto_nombre, cantidad, precio_unitario, usuario_email, imagen });
     res.json({ success: true, mensaje: "Agregado al carrito mayorista", item });
   } catch (e) {
     res.status(500).json({ error: e.message });
