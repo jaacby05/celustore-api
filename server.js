@@ -459,6 +459,18 @@ app.get("/api/app/carrito-mayorista", async (req, res) => {
   }
 });
 
+// POST /api/app/carrito-mayorista-eliminar — sacar un ítem del carrito mayorista
+app.post("/api/app/carrito-mayorista-eliminar", async (req, res) => {
+  try {
+    const { id } = req.body || {};
+    if (!id) return res.json({ error: "Falta el id del ítem" });
+    await CarritoMayorista.deleteOne({ _id: id });
+    res.json({ success: true, mensaje: "Producto eliminado del carrito mayorista" });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/app/ordenes-mayoristas — checkout mayorista
 app.post("/api/app/ordenes-mayoristas", async (req, res) => {
   try {
