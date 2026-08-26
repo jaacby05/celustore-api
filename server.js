@@ -162,6 +162,24 @@ const productoAppSchema = new mongoose.Schema(
     stock:    { type: Number, default: 0 },
     imagen:   { type: String, default: "" },
     activo:   { type: Boolean, default: true },
+    categoria: { type: String, default: "" },
+    descripcion: { type: String, default: "" },
+    es_celular: { type: Boolean, default: false },
+
+    // Solo celulares
+    bateria_mah:       { type: Number, default: null },
+    ram_gb:            { type: Number, default: null },
+    almacenamiento_gb: { type: Number, default: null },
+    camara_mp:         { type: Number, default: null },
+    pantalla_pulgadas: { type: Number, default: null },
+    procesador_nombre: { type: String, default: "" },
+    antutu_score:      { type: Number, default: null },
+    camera_score:      { type: Number, default: null },
+
+    // Solo accesorios
+    potencia_watts:  { type: Number, default: null },
+    compatible_con:  { type: String, default: "" },
+    tipo_conexion:   { type: String, default: "" },
   },
   { timestamps: true }
 );
@@ -221,6 +239,48 @@ app.get("/api/app/productos", async (req, res) => {
         precio: p.precio, stock: p.stock, imagen: p.imagen,
       })),
     });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/app/catalogo-ia — arma el catalogo_txt igual que asistente.php,
+// más la lista de productos (para armar las tarjetas [ID:XX] en la app)
+app.get("/api/app/catalogo-ia", async (req, res) => {
+  try {
+    const productos = await ProductoApp.find({ activo: true, stock: { $gt: 0 } })
+      .sort({ es_celular: -1, precio: 1 });
+
+    let catalogo_txt = "";
+    const productos_lista = productos.map((p) => {
+      let linea = `[ID:${p.id_mysql}] ${p.marca} ${p.nombre} | `;
+      linea += `Precio: $${Number(p.precio).toLocaleString("es-AR")} | `;
+      linea += `Stock: ${p.stock} | Categoría: ${p.categoria || ""} | `;
+
+      if (p.es_celular) {
+        if (p.bateria_mah)       linea += `Batería: ${p.bateria_mah} mAh | `;
+        if (p.ram_gb)            linea += `RAM: ${p.ram_gb} GB | `;
+        if (p.almacenamiento_gb) linea += `Almacenamiento: ${p.almacenamiento_gb} GB | `;
+        if (p.camara_mp)         linea += `Cámara: ${p.camara_mp} MP | `;
+        if (p.pantalla_pulgadas) linea += `Pantalla: ${p.pantalla_pulgadas}" | `;
+        if (p.procesador_nombre) linea += `Procesador: ${p.procesador_nombre} | `;
+        if (p.antutu_score)      linea += `AnTuTu: ${p.antutu_score} | `;
+        if (p.camera_score)      linea += `Camera Score: ${p.camera_score} | `;
+      } else {
+        if (p.potencia_watts) linea += `Potencia: ${p.potencia_watts} W | `;
+        if (p.tipo_conexion)  linea += `Conexión: ${p.tipo_conexion} | `;
+        if (p.compatible_con) linea += `Compatible con: ${p.compatible_con} | `;
+      }
+      if (p.descripcion) linea += `Desc: ${p.descripcion.slice(0, 100)}`;
+      catalogo_txt += linea + "\n";
+
+      return {
+        id: p.id_mysql, nombre: p.nombre, marca: p.marca,
+        precio: p.precio, imagen: p.imagen,
+      };
+    });
+
+    res.json({ catalogo_txt, productos: productos_lista });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -341,14 +401,29 @@ app.post("/api/app/sync-usuario", async (req, res) => {
 // POST /api/app/sync-producto — crear o actualizar (upsert por id_mysql)
 app.post("/api/app/sync-producto", async (req, res) => {
   try {
-    const { id_mysql, nombre, marca, precio, stock, imagen, activo } = req.body || {};
+    const {
+      id_mysql, nombre, marca, precio, stock, imagen, activo,
+      categoria, descripcion, es_celular,
+      bateria_mah, ram_gb, almacenamiento_gb, camara_mp,
+      pantalla_pulgadas, procesador_nombre, antutu_score, camera_score,
+      potencia_watts, compatible_con, tipo_conexion,
+    } = req.body || {};
     if (!id_mysql || !nombre) {
       return res.json({ error: "Faltan datos para sincronizar el producto" });
     }
     await ProductoApp.findOneAndUpdate(
       { id_mysql },
-      { id_mysql, nombre, marca: marca || "", precio: precio || 0, stock: stock || 0,
-        imagen: imagen || "", activo: activo !== false },
+      {
+        id_mysql, nombre, marca: marca || "", precio: precio || 0, stock: stock || 0,
+        imagen: imagen || "", activo: activo !== false,
+        categoria: categoria || "", descripcion: descripcion || "", es_celular: !!es_celular,
+        bateria_mah: bateria_mah ?? null, ram_gb: ram_gb ?? null,
+        almacenamiento_gb: almacenamiento_gb ?? null, camara_mp: camara_mp ?? null,
+        pantalla_pulgadas: pantalla_pulgadas ?? null, procesador_nombre: procesador_nombre || "",
+        antutu_score: antutu_score ?? null, camera_score: camera_score ?? null,
+        potencia_watts: potencia_watts ?? null, compatible_con: compatible_con || "",
+        tipo_conexion: tipo_conexion || "",
+      },
       { upsert: true, new: true }
     );
     res.json({ success: true });
