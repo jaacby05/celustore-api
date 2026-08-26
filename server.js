@@ -104,6 +104,11 @@ const ordenMovilSchema = new mongoose.Schema(
     costo_envio:      { type: Number, default: 0 },
     numero_orden:     { type: String, required: true },
     estado:           { type: String, default: "pendiente" },
+    items: [{
+      producto_id: String, producto_nombre: String,
+      cantidad: Number, precio: Number,
+    }],
+    total: { type: Number, default: 0 }, // subtotal de productos + costo_envio
   },
   { timestamps: true }
 );
@@ -346,8 +351,17 @@ app.post("/api/app/ordenes", async (req, res) => {
     if (!datos.usuario_email || !datos.domicilio_envio) {
       return res.json({ error: "Faltan datos para crear la orden" });
     }
+    const itemsCarrito = await CarritoMovil.find({ usuario_email: datos.usuario_email });
+    const subtotal = itemsCarrito.reduce((s, i) => s + i.precio * i.cantidad, 0);
+    const costo_envio = Number(datos.costo_envio) || 0;
+    const total = subtotal + costo_envio;
+    const items = itemsCarrito.map((i) => ({
+      producto_id: i.producto_id, producto_nombre: i.producto_nombre,
+      cantidad: i.cantidad, precio: i.precio,
+    }));
+
     const numero_orden = "ORD-" + Date.now();
-    const orden = await OrdenMovil.create({ ...datos, numero_orden });
+    const orden = await OrdenMovil.create({ ...datos, numero_orden, items, total });
     // Al confirmar la orden, vaciamos el carrito de ese usuario
     await CarritoMovil.deleteMany({ usuario_email: datos.usuario_email });
     res.json({ success: true, numero_orden, orden });
@@ -363,7 +377,7 @@ app.get("/api/app/ordenes", async (req, res) => {
     const ordenes = await OrdenMovil.find(filtro).sort({ createdAt: -1 });
     const mapeadas = ordenes.map((o) => ({
       numero_orden: o.numero_orden, estado: o.estado, fecha: o.createdAt,
-      total: o.costo_envio || 0,
+      total: o.total || 0, tipo: "normal",
     }));
     res.json({ ordenes: mapeadas });
   } catch (e) {
@@ -593,6 +607,7 @@ app.get("/api/app/ordenes-mayoristas", async (req, res) => {
     const ordenes = await OrdenMayorista.find(filtro).sort({ createdAt: -1 });
     const mapeadas = ordenes.map((o) => ({
       numero_orden: o.numero_orden, estado: o.estado, fecha: o.createdAt, total: o.total,
+      tipo: "mayorista",
     }));
     res.json({ ordenes: mapeadas });
   } catch (e) {
