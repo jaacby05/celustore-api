@@ -41,7 +41,6 @@ const Resena = mongoose.model("Resena", resenaSchema, "resenas");
 // ── Schema Artículo de Proveedor ──────────────────────────────────────────
 const articuloSchema = new mongoose.Schema(
   {
-    // Campos comunes
     tipo:             { type: String, required: true, enum: ["celular", "accesorio"] },
     marca:            { type: String, required: true },
     condicion:        { type: String, required: true, enum: ["nuevo", "reacondicionado", "sellado"] },
@@ -49,16 +48,12 @@ const articuloSchema = new mongoose.Schema(
     precio:           { type: Number, required: true, min: 0 },
     id_proveedor:     { type: Number, required: true },
     proveedor_nombre: { type: String, default: "" },
-
-    // Solo celulares
     modelo:           { type: String, default: "" },
     color:            { type: String, default: "" },
     almacenamiento:   { type: String, default: "" },
     ram:              { type: String, default: "" },
     bateria:          { type: Number, default: null },
     camara:           { type: Number, default: null },
-
-    // Solo accesorios
     categoria:        { type: String, default: "" },
     descripcion:      { type: String, default: "" },
     compatible_con:   { type: String, default: "" },
@@ -104,31 +99,36 @@ const ordenMovilSchema = new mongoose.Schema(
     costo_envio:      { type: Number, default: 0 },
     numero_orden:     { type: String, required: true },
     estado:           { type: String, default: "pendiente" },
+    // ── NUEVO: estado del pago, separado del estado logístico ─────────
+    estado_pago:      { type: String, default: "pendiente_pago" }, // pendiente_pago | aprobado | rechazado | cancelado
+    mp_payment_id:    { type: String, default: null },
+    mp_status_detail: { type: String, default: null },
+    stock_descontado: { type: Boolean, default: false },
     items: [{
       producto_id: String, producto_nombre: String,
       cantidad: Number, precio: Number,
     }],
-    total: { type: Number, default: 0 }, // subtotal de productos + costo_envio
+    total: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
 const OrdenMovil = mongoose.model("OrdenMovil", ordenMovilSchema, "ordenes_movil");
 
-// ── Schema Carrito Mayorista (separado del carrito normal) ────────────────
+// ── Schema Carrito Mayorista ────────────────────────────────────────────
 const carritoMayoristaSchema = new mongoose.Schema(
   {
     producto_id:      { type: String, required: true },
     producto_nombre:  { type: String, required: true },
     imagen:           { type: String, default: "" },
     cantidad:         { type: Number, required: true },
-    precio_unitario:  { type: Number, required: true }, // ya con el descuento aplicado
+    precio_unitario:  { type: Number, required: true },
     usuario_email:    { type: String, required: true },
   },
   { timestamps: true }
 );
 const CarritoMayorista = mongoose.model("CarritoMayorista", carritoMayoristaSchema, "carrito_mayorista");
 
-// ── Schema Órdenes Mayoristas (separadas de las órdenes normales) ─────────
+// ── Schema Órdenes Mayoristas ─────────
 const ordenMayoristaSchema = new mongoose.Schema(
   {
     usuario_email:     { type: String, required: true },
@@ -143,11 +143,11 @@ const ordenMayoristaSchema = new mongoose.Schema(
 );
 const OrdenMayorista = mongoose.model("OrdenMayorista", ordenMayoristaSchema, "ordenes_mayoristas");
 
-// ── Schema Caja Mayorista (ingresos/egresos, separado de la caja normal) ──
+// ── Schema Caja Mayorista ──────────────
 const cajaMayoristaSchema = new mongoose.Schema(
   {
     tipo:        { type: String, enum: ["ingreso", "egreso"], required: true },
-    categoria:   { type: String, required: true }, // 'venta_mayorista', 'mercaderia', 'envio', 'otro'
+    categoria:   { type: String, required: true },
     descripcion: { type: String, required: true },
     monto:       { type: Number, required: true },
   },
@@ -155,12 +155,10 @@ const cajaMayoristaSchema = new mongoose.Schema(
 );
 const CajaMayorista = mongoose.model("CajaMayorista", cajaMayoristaSchema, "caja_mayorista");
 
-// ── Schema Producto (copia del catálogo REAL de MySQL, sincronizada
-//    automáticamente desde admin/productos.php cada vez que se
-//    crea/edita/borra un producto en la web) ───────────────────────────────
+// ── Schema Producto (copia del catálogo REAL de MySQL) ─────────────────
 const productoAppSchema = new mongoose.Schema(
   {
-    id_mysql: { type: Number, required: true, unique: true }, // id real en la tabla `productos`
+    id_mysql: { type: Number, required: true, unique: true },
     nombre:   { type: String, required: true },
     marca:    { type: String, default: "" },
     precio:   { type: Number, required: true },
@@ -170,8 +168,6 @@ const productoAppSchema = new mongoose.Schema(
     categoria: { type: String, default: "" },
     descripcion: { type: String, default: "" },
     es_celular: { type: Boolean, default: false },
-
-    // Solo celulares
     bateria_mah:       { type: Number, default: null },
     ram_gb:            { type: Number, default: null },
     almacenamiento_gb: { type: Number, default: null },
@@ -180,8 +176,6 @@ const productoAppSchema = new mongoose.Schema(
     procesador_nombre: { type: String, default: "" },
     antutu_score:      { type: Number, default: null },
     camera_score:      { type: Number, default: null },
-
-    // Solo accesorios
     potencia_watts:  { type: Number, default: null },
     compatible_con:  { type: String, default: "" },
     tipo_conexion:   { type: String, default: "" },
@@ -190,8 +184,7 @@ const productoAppSchema = new mongoose.Schema(
 );
 const ProductoApp = mongoose.model("ProductoApp", productoAppSchema, "productos_app");
 
-// ── Schema Stock Pendiente (compras mayoristas desde la app que
-//    todavía no se descontaron del stock real en MySQL) ───────────────────
+// ── Schema Stock Pendiente (compras mayoristas desde la app) ────────────
 const stockPendienteSchema = new mongoose.Schema(
   {
     id_mysql: { type: Number, required: true },
@@ -202,9 +195,83 @@ const stockPendienteSchema = new mongoose.Schema(
 );
 const StockPendiente = mongoose.model("StockPendiente", stockPendienteSchema, "stock_pendiente_mayorista");
 
-// ── Configuración del modo mayorista ───────────────────────────────────────
-const DESCUENTO_MAYORISTA = 0.15;     // 15% menos que el precio normal
-const CANTIDAD_MINIMA_MAYORISTA = 10; // unidades mínimas por producto
+const DESCUENTO_MAYORISTA = 0.15;
+const CANTIDAD_MINIMA_MAYORISTA = 10;
+
+
+// ══════════════════════════════════════════════════════════════════════════
+// AGREGADO PARA MERCADO PAGO — variables y modelo de auditoría
+// ══════════════════════════════════════════════════════════════════════════
+const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
+const MP_API_BASE = "https://api.mercadopago.com";
+
+const auditoriaMovilSchema = new mongoose.Schema(
+  {
+    coleccion_afectada: { type: String, required: true },
+    registro_id:        { type: String, required: true },
+    accion:              { type: String, required: true },
+    campo:               { type: String, default: null },
+    valor_anterior:      { type: String, default: null },
+    valor_nuevo:         { type: String, default: null },
+    usuario_email:       { type: String, default: null },
+  },
+  { timestamps: true }
+);
+const AuditoriaMovil = mongoose.model("AuditoriaMovil", auditoriaMovilSchema, "auditoria_movil");
+
+// Función que reemplaza al "trigger + procedimiento almacenado" para
+// las órdenes de la app (Mongo no tiene triggers nativos como MySQL).
+async function confirmarPagoOrdenMovil(numero_orden, mp_payment_id, mp_status, mp_status_detail) {
+    let nuevoEstadoPago;
+    if (mp_status === "approved") nuevoEstadoPago = "aprobado";
+    else if (mp_status === "rejected") nuevoEstadoPago = "rechazado";
+    else if (["cancelled", "refunded", "charged_back"].includes(mp_status)) nuevoEstadoPago = "cancelado";
+    else nuevoEstadoPago = "pendiente_pago";
+
+    const orden = await OrdenMovil.findOne({ numero_orden });
+    if (!orden) return { resultado: "error", mensaje: "La orden no existe" };
+
+    if (orden.estado_pago === "aprobado" && orden.stock_descontado) {
+        return { resultado: "sin_cambios", mensaje: "La orden ya estaba confirmada previamente" };
+    }
+
+    const estadoPagoAnterior = orden.estado_pago;
+    orden.estado_pago = nuevoEstadoPago;
+    orden.mp_payment_id = mp_payment_id;
+    orden.mp_status_detail = mp_status_detail;
+
+    if (estadoPagoAnterior !== nuevoEstadoPago) {
+        await AuditoriaMovil.create({
+            coleccion_afectada: "ordenes_movil", registro_id: orden._id.toString(),
+            accion: "cambio_estado_pago", campo: "estado_pago",
+            valor_anterior: estadoPagoAnterior, valor_nuevo: nuevoEstadoPago,
+            usuario_email: orden.usuario_email,
+        });
+    }
+    if (mp_payment_id) {
+        await AuditoriaMovil.create({
+            coleccion_afectada: "ordenes_movil", registro_id: orden._id.toString(),
+            accion: "pago_registrado", campo: "mp_payment_id",
+            valor_anterior: null, valor_nuevo: mp_payment_id,
+            usuario_email: orden.usuario_email,
+        });
+    }
+
+    if (nuevoEstadoPago === "aprobado" && !orden.stock_descontado) {
+        for (const item of orden.items) {
+            const idNum = Number(item.producto_id);
+            if (!isNaN(idNum)) {
+                await ProductoApp.findOneAndUpdate({ id_mysql: idNum }, { $inc: { stock: -item.cantidad } });
+                await StockPendiente.create({ id_mysql: idNum, cantidad: item.cantidad });
+            }
+        }
+        orden.stock_descontado = true;
+    }
+
+    await orden.save();
+    return { resultado: "ok", mensaje: `Orden actualizada a estado_pago=${nuevoEstadoPago}` };
+}
+// ══════════════════════════════════════════════════════════════════════════
 
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -234,7 +301,7 @@ app.post("/api/app/login", async (req, res) => {
   }
 });
 
-// GET /api/app/productos — catálogo REAL, sincronizado desde MySQL
+// GET /api/app/productos
 app.get("/api/app/productos", async (req, res) => {
   try {
     const productos = await ProductoApp.find({ activo: true }).sort({ createdAt: -1 });
@@ -249,8 +316,7 @@ app.get("/api/app/productos", async (req, res) => {
   }
 });
 
-// GET /api/app/catalogo-ia — arma el catalogo_txt igual que asistente.php,
-// más la lista de productos (para armar las tarjetas [ID:XX] en la app)
+// GET /api/app/catalogo-ia
 app.get("/api/app/catalogo-ia", async (req, res) => {
   try {
     const productos = await ProductoApp.find({ activo: true, stock: { $gt: 0 } })
@@ -291,7 +357,7 @@ app.get("/api/app/catalogo-ia", async (req, res) => {
   }
 });
 
-// GET /api/app/productos/:id — :id acá es el id_mysql (el mismo que en la web)
+// GET /api/app/productos/:id
 app.get("/api/app/productos/:id", async (req, res) => {
   try {
     const p = await ProductoApp.findOne({ id_mysql: req.params.id, activo: true });
@@ -307,7 +373,7 @@ app.get("/api/app/productos/:id", async (req, res) => {
   }
 });
 
-// POST /api/app/carrito — agregar un producto (esto es lo que la app encola si no hay red)
+// POST /api/app/carrito
 app.post("/api/app/carrito", async (req, res) => {
   try {
     const { producto_id, producto_nombre, cantidad, precio, usuario_email, imagen } = req.body || {};
@@ -321,7 +387,7 @@ app.post("/api/app/carrito", async (req, res) => {
   }
 });
 
-// GET /api/app/carrito?usuario_email=...
+// GET /api/app/carrito
 app.get("/api/app/carrito", async (req, res) => {
   try {
     const filtro = req.query.usuario_email ? { usuario_email: req.query.usuario_email } : {};
@@ -332,7 +398,7 @@ app.get("/api/app/carrito", async (req, res) => {
   }
 });
 
-// POST /api/app/carrito-eliminar — sacar un ítem del carrito
+// POST /api/app/carrito-eliminar
 app.post("/api/app/carrito-eliminar", async (req, res) => {
   try {
     const { id } = req.body || {};
@@ -345,6 +411,9 @@ app.post("/api/app/carrito-eliminar", async (req, res) => {
 });
 
 // POST /api/app/ordenes — checkout
+// ── MODIFICADO: ahora la orden nace en estado_pago "pendiente_pago"
+// (por default, según el schema) y el pago se confirma después con
+// /api/app/pagos/procesar o /api/app/pagos/webhook.
 app.post("/api/app/ordenes", async (req, res) => {
   try {
     const datos = req.body || {};
@@ -362,34 +431,111 @@ app.post("/api/app/ordenes", async (req, res) => {
 
     const numero_orden = "ORD-" + Date.now();
     const orden = await OrdenMovil.create({ ...datos, numero_orden, items, total });
-    // Al confirmar la orden, vaciamos el carrito de ese usuario
     await CarritoMovil.deleteMany({ usuario_email: datos.usuario_email });
-    res.json({ success: true, numero_orden, orden });
+    res.json({
+      success: true, numero_orden, orden,
+      // el front usa esto para inicializar el Brick de Mercado Pago
+      mp_public_key: "TEST-174010ef-c3d8-4fa1-b282-95e64784f14b",
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// GET /api/app/ordenes?usuario_email=...
-app.get("/api/app/ordenes", async (req, res) => {
+// ══════════════════════════════════════════════════════════════════════════
+// AGREGADO PARA MERCADO PAGO — rutas de pago para la app
+// ══════════════════════════════════════════════════════════════════════════
+
+// POST /api/app/pagos/procesar
+app.post("/api/app/pagos/procesar", async (req, res) => {
   try {
-    const filtro = req.query.usuario_email ? { usuario_email: req.query.usuario_email } : {};
-    const ordenes = await OrdenMovil.find(filtro).sort({ createdAt: -1 });
-    const mapeadas = ordenes.map((o) => ({
-      numero_orden: o.numero_orden, estado: o.estado, fecha: o.createdAt,
-      total: o.total || 0, tipo: "normal",
-    }));
-    res.json({ ordenes: mapeadas });
+    const { numero_orden, token, installments, payment_method_id, issuer_id, email } = req.body || {};
+    if (!numero_orden || !token || !payment_method_id) {
+      return res.json({ error: "Faltan datos del pago" });
+    }
+
+    const orden = await OrdenMovil.findOne({ numero_orden });
+    if (!orden) return res.json({ error: "Orden no encontrada" });
+    if (orden.estado_pago !== "pendiente_pago") {
+      return res.json({ error: "Esta orden ya fue procesada anteriormente" });
+    }
+
+    const idempotencyKey = "orden-" + orden._id.toString() + "-" + Date.now();
+    const body = {
+      transaction_amount: Number(orden.total),
+      token,
+      description: "CeluStore App - Orden " + numero_orden,
+      installments: installments > 0 ? installments : 1,
+      payment_method_id,
+      binary_mode: true,
+      payer: { email: email || null },
+      external_reference: numero_orden,
+      notification_url: "https://celustore-api-xlsm.onrender.com/api/app/pagos/webhook",
+    };
+    if (issuer_id) body.issuer_id = issuer_id;
+
+    const mpRes = await fetch(MP_API_BASE + "/v1/payments", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + MP_ACCESS_TOKEN,
+        "X-Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify(body),
+    });
+    const pago = await mpRes.json();
+
+    if (!mpRes.ok || !pago.status) {
+      console.error("Error MP (app):", pago);
+      return res.json({ error: "Mercado Pago rechazo la solicitud: " + (pago.message || "error desconocido") });
+    }
+
+    const resultado = await confirmarPagoOrdenMovil(
+      numero_orden, String(pago.id || ""), pago.status, pago.status_detail || ""
+    );
+
+    res.json({
+      success: true, mp_status: pago.status, mp_status_detail: pago.status_detail,
+      numero_orden, confirmacion: resultado,
+    });
   } catch (e) {
+    console.error("Error /api/app/pagos/procesar:", e);
     res.status(500).json({ error: e.message });
   }
 });
 
-// POST /api/app/sync-usuario — la web llama esto (desde el navegador del
-// que se registra) justo después de verificar su cuenta, para replicar
-// el usuario en Mongo y que ya pueda usar la app. El rol siempre se
-// fuerza a "cliente" acá, sin importar qué mande el pedido, para que
-// nadie pueda crearse una cuenta admin llamando a este endpoint directo.
+// POST /api/app/pagos/webhook
+app.post("/api/app/pagos/webhook", async (req, res) => {
+  try {
+    const paymentId = req.body?.data?.id || req.query.id || req.query["data.id"];
+    const tipo = req.body?.type || req.query.type || req.query.topic;
+
+    if (tipo !== "payment" || !paymentId) {
+      return res.status(200).json({ ignorado: true });
+    }
+
+    const mpRes = await fetch(MP_API_BASE + "/v1/payments/" + encodeURIComponent(paymentId), {
+      headers: { "Authorization": "Bearer " + MP_ACCESS_TOKEN },
+    });
+    if (!mpRes.ok) {
+      console.error("Webhook app: no se pudo verificar el pago", paymentId);
+      return res.status(200).json({ error: "no se pudo verificar el pago" });
+    }
+    const pago = await mpRes.json();
+    const numero_orden = pago.external_reference;
+    if (!numero_orden) return res.status(200).json({ error: "sin external_reference" });
+
+    await confirmarPagoOrdenMovil(numero_orden, String(paymentId), pago.status, pago.status_detail || "");
+    res.status(200).json({ success: true });
+  } catch (e) {
+    console.error("Error webhook app:", e);
+    res.status(200).json({ error: e.message });
+  }
+});
+// ══════════════════════════════════════════════════════════════════════════
+
+
+// POST /api/app/sync-usuario
 app.post("/api/app/sync-usuario", async (req, res) => {
   try {
     const { nombre, email, password } = req.body || {};
@@ -407,12 +553,7 @@ app.post("/api/app/sync-usuario", async (req, res) => {
   }
 });
 
-// ════════════════════════════════════════════════════════════════════════════
-// SINCRONIZACIÓN DEL CATÁLOGO REAL (llamado por PHP vía cURL desde
-// admin/productos.php, cada vez que se crea/edita/borra un producto)
-// ════════════════════════════════════════════════════════════════════════════
-
-// POST /api/app/sync-producto — crear o actualizar (upsert por id_mysql)
+// POST /api/app/sync-producto
 app.post("/api/app/sync-producto", async (req, res) => {
   try {
     const {
@@ -446,7 +587,7 @@ app.post("/api/app/sync-producto", async (req, res) => {
   }
 });
 
-// POST /api/app/sync-producto-eliminar — borrar (o desactivar) del catálogo
+// POST /api/app/sync-producto-eliminar
 app.post("/api/app/sync-producto-eliminar", async (req, res) => {
   try {
     const { id_mysql, definitivo } = req.body || {};
@@ -462,13 +603,7 @@ app.post("/api/app/sync-producto-eliminar", async (req, res) => {
   }
 });
 
-// ════════════════════════════════════════════════════════════════════════════
-// STOCK PENDIENTE (compras mayoristas de la app, pendientes de descontar
-// del stock real en MySQL — se aplican vía cURL desde la web, ver
-// config/sync-stock-mayorista.php)
-// ════════════════════════════════════════════════════════════════════════════
-
-// GET /api/app/admin/stock-pendiente — lo que falta descontar
+// GET /api/app/admin/stock-pendiente
 app.get("/api/app/admin/stock-pendiente", async (req, res) => {
   try {
     const pendientes = await StockPendiente.find({ aplicado: false });
@@ -481,7 +616,7 @@ app.get("/api/app/admin/stock-pendiente", async (req, res) => {
   }
 });
 
-// POST /api/app/admin/stock-pendiente/aplicar — marcar como ya descontados
+// POST /api/app/admin/stock-pendiente/aplicar
 app.post("/api/app/admin/stock-pendiente/aplicar", async (req, res) => {
   try {
     const { ids } = req.body || {};
@@ -494,11 +629,6 @@ app.post("/api/app/admin/stock-pendiente/aplicar", async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
-
-// ════════════════════════════════════════════════════════════════════════════
-// RUTAS MAYORISTAS — "caja aparte" de la compra normal, mismos productos
-// pero con precio con descuento y cantidad mínima por producto
-// ════════════════════════════════════════════════════════════════════════════
 
 // GET /api/app/productos-mayorista
 app.get("/api/app/productos-mayorista", async (req, res) => {
@@ -537,7 +667,7 @@ app.post("/api/app/carrito-mayorista", async (req, res) => {
   }
 });
 
-// GET /api/app/carrito-mayorista?usuario_email=...
+// GET /api/app/carrito-mayorista
 app.get("/api/app/carrito-mayorista", async (req, res) => {
   try {
     const filtro = req.query.usuario_email ? { usuario_email: req.query.usuario_email } : {};
@@ -548,7 +678,7 @@ app.get("/api/app/carrito-mayorista", async (req, res) => {
   }
 });
 
-// POST /api/app/carrito-mayorista-eliminar — sacar un ítem del carrito mayorista
+// POST /api/app/carrito-mayorista-eliminar
 app.post("/api/app/carrito-mayorista-eliminar", async (req, res) => {
   try {
     const { id } = req.body || {};
@@ -560,7 +690,7 @@ app.post("/api/app/carrito-mayorista-eliminar", async (req, res) => {
   }
 });
 
-// POST /api/app/ordenes-mayoristas — checkout mayorista
+// POST /api/app/ordenes-mayoristas
 app.post("/api/app/ordenes-mayoristas", async (req, res) => {
   try {
     const datos = req.body || {};
@@ -572,9 +702,6 @@ app.post("/api/app/ordenes-mayoristas", async (req, res) => {
     const numero_orden = "MAY-" + Date.now();
     const orden = await OrdenMayorista.create({ ...datos, numero_orden, total });
 
-    // Anotar el stock que hay que descontar en MySQL (se aplica solo
-    // cuando alguien visite la web, vía cURL desde PHP — ver
-    // config/sync-stock-mayorista.php)
     for (const item of itemsCarrito) {
       const idNum = Number(item.producto_id);
       if (!isNaN(idNum)) {
@@ -584,13 +711,10 @@ app.post("/api/app/ordenes-mayoristas", async (req, res) => {
 
     await CarritoMayorista.deleteMany({ usuario_email: datos.usuario_email });
 
-    // Registrar el ingreso automáticamente en la caja mayorista
     if (total > 0) {
       await CajaMayorista.create({
-        tipo: "ingreso",
-        categoria: "venta_mayorista",
-        descripcion: `Venta mayorista - Pedido ${numero_orden}`,
-        monto: total,
+        tipo: "ingreso", categoria: "venta_mayorista",
+        descripcion: `Venta mayorista - Pedido ${numero_orden}`, monto: total,
       });
     }
 
@@ -600,7 +724,7 @@ app.post("/api/app/ordenes-mayoristas", async (req, res) => {
   }
 });
 
-// GET /api/app/ordenes-mayoristas?usuario_email=...
+// GET /api/app/ordenes-mayoristas
 app.get("/api/app/ordenes-mayoristas", async (req, res) => {
   try {
     const filtro = req.query.usuario_email ? { usuario_email: req.query.usuario_email } : {};
@@ -615,21 +739,31 @@ app.get("/api/app/ordenes-mayoristas", async (req, res) => {
   }
 });
 
-// ── ADMIN: Caja Mayorista ───────────────────────────────────────────────
-// GET /api/app/admin/caja-mayorista — resumen + historial completo
+// GET /api/app/ordenes
+app.get("/api/app/ordenes", async (req, res) => {
+  try {
+    const filtro = req.query.usuario_email ? { usuario_email: req.query.usuario_email } : {};
+    const ordenes = await OrdenMovil.find(filtro).sort({ createdAt: -1 });
+    const mapeadas = ordenes.map((o) => ({
+      numero_orden: o.numero_orden, estado: o.estado, estado_pago: o.estado_pago,
+      fecha: o.createdAt, total: o.total || 0, tipo: "normal",
+    }));
+    res.json({ ordenes: mapeadas });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/app/admin/caja-mayorista
 app.get("/api/app/admin/caja-mayorista", async (req, res) => {
   try {
     const movimientos = await CajaMayorista.find().sort({ createdAt: -1 });
     const total_ingresos = movimientos.filter(m => m.tipo === "ingreso").reduce((s, m) => s + m.monto, 0);
     const total_egresos = movimientos.filter(m => m.tipo === "egreso").reduce((s, m) => s + m.monto, 0);
     res.json({
-      success: true,
-      saldo: total_ingresos - total_egresos,
-      total_ingresos,
-      total_egresos,
+      success: true, saldo: total_ingresos - total_egresos, total_ingresos, total_egresos,
       movimientos: movimientos.map(m => ({
-        tipo: m.tipo, categoria: m.categoria, descripcion: m.descripcion,
-        monto: m.monto, fecha: m.createdAt,
+        tipo: m.tipo, categoria: m.categoria, descripcion: m.descripcion, monto: m.monto, fecha: m.createdAt,
       })),
     });
   } catch (e) {
@@ -637,7 +771,7 @@ app.get("/api/app/admin/caja-mayorista", async (req, res) => {
   }
 });
 
-// POST /api/app/admin/caja-mayorista — registrar un egreso manual
+// POST /api/app/admin/caja-mayorista
 app.post("/api/app/admin/caja-mayorista", async (req, res) => {
   try {
     const { categoria, monto, descripcion } = req.body || {};
@@ -651,7 +785,6 @@ app.post("/api/app/admin/caja-mayorista", async (req, res) => {
 });
 
 
-
 // GET /health
 app.get("/health", (req, res) => {
   res.json({
@@ -663,7 +796,6 @@ app.get("/health", (req, res) => {
 
 // ── ARTÍCULOS DE PROVEEDORES ──────────────────────────────────────────────
 
-// GET /api/articulos
 app.get("/api/articulos", async (req, res) => {
   try {
     const filtro = {};
@@ -684,7 +816,6 @@ app.get("/api/articulos", async (req, res) => {
   }
 });
 
-// GET /api/articulos/mas-barato
 app.get("/api/articulos/mas-barato", async (req, res) => {
   try {
     const filtro = {};
@@ -699,7 +830,6 @@ app.get("/api/articulos/mas-barato", async (req, res) => {
   }
 });
 
-// GET /api/articulos/:id
 app.get("/api/articulos/:id", async (req, res) => {
   try {
     const articulo = await Articulo.findById(req.params.id).lean();
@@ -710,14 +840,11 @@ app.get("/api/articulos/:id", async (req, res) => {
   }
 });
 
-// POST /api/articulos
 app.post("/api/articulos", async (req, res) => {
   try {
     const {
       tipo, marca, condicion, cantidad, precio, id_proveedor, proveedor_nombre,
-      // celular
       modelo, color, almacenamiento, ram, bateria, camara,
-      // accesorio
       categoria, descripcion, compatible_con,
     } = req.body;
 
@@ -734,14 +861,12 @@ app.post("/api/articulos", async (req, res) => {
       precio:           parseFloat(precio),
       id_proveedor:     parseInt(id_proveedor),
       proveedor_nombre: proveedor_nombre || "",
-      // celular
       modelo:         modelo         || "",
       color:          color          || "",
       almacenamiento: almacenamiento || "",
       ram:            ram            || "",
       bateria:        bateria        ? parseInt(bateria)  : null,
       camara:         camara         ? parseInt(camara)   : null,
-      // accesorio
       categoria:      categoria      || "",
       descripcion:    descripcion    || "",
       compatible_con: compatible_con || "",
@@ -755,7 +880,6 @@ app.post("/api/articulos", async (req, res) => {
   }
 });
 
-// DELETE /api/articulos/:id
 app.delete("/api/articulos/:id", async (req, res) => {
   try {
     const articulo = await Articulo.findByIdAndDelete(req.params.id);
@@ -768,7 +892,6 @@ app.delete("/api/articulos/:id", async (req, res) => {
 
 // ── RESEÑAS ───────────────────────────────────────────────────────────────
 
-// GET /api/resenas/:producto_id
 app.get("/api/resenas/:producto_id", async (req, res) => {
   try {
     const producto_id = parseInt(req.params.producto_id);
@@ -807,7 +930,6 @@ app.get("/api/resenas/:producto_id", async (req, res) => {
   }
 });
 
-// POST /api/resenas
 app.post("/api/resenas", async (req, res) => {
   try {
     const { producto_id, usuario_id, usuario_nombre, puntuacion, titulo, comentario, caracteristicas } = req.body;
@@ -837,7 +959,6 @@ app.post("/api/resenas", async (req, res) => {
   }
 });
 
-// PUT /api/resenas/:id/util
 app.put("/api/resenas/:id/util", async (req, res) => {
   try {
     const resena = await Resena.findByIdAndUpdate(req.params.id, { $inc: { util: 1 } }, { new: true });
@@ -848,7 +969,6 @@ app.put("/api/resenas/:id/util", async (req, res) => {
   }
 });
 
-// DELETE /api/resenas/:id
 app.delete("/api/resenas/:id", async (req, res) => {
   try {
     const resena = await Resena.findByIdAndDelete(req.params.id);
@@ -859,64 +979,52 @@ app.delete("/api/resenas/:id", async (req, res) => {
   }
 });
 
-
 // ── SISTEMA EXPERTO: MOTOR DE INFERENCIA LÓGICA ────────────────────────────
 
-// POST /api/recomendar
-// Este endpoint procesa las respuestas del cliente y deduce las reglas/filtros técnicos idóneos.
 app.post("/api/recomendar", (req, res) => {
   try {
     const { presupuesto, uso_principal, requiere_bateria } = req.body;
 
-    // Validación de entrada
     if (!presupuesto || !uso_principal) {
       return res.status(400).json({ error: "El presupuesto y el uso principal son requeridos" });
     }
 
-    // 1. Inicializamos los filtros técnicos por defecto basados en el presupuesto del cliente
     let filtrosSugeridos = {
-      precio_max:  floatval = parseFloat(presupuesto),
+      precio_max:  parseFloat(presupuesto),
       ram_min:     4,
       camara_min:  12,
       bateria_min: 4000,
       procesador:  "media"
     };
 
-    // 2. Motor de Inferencia: Evaluamos las reglas de negocio según el perfil de uso seleccionado
     switch (uso_principal.toLowerCase()) {
       case "gaming":
       case "juegos":
-        // REGLA: Si quiere jugar, se exige rendimiento alto, procesador tope y mínimo 8GB de RAM
         filtrosSugeridos.ram_min = 8;
         filtrosSugeridos.procesador = "alta";
         break;
 
       case "fotografia":
       case "fotos":
-        // REGLA: Si busca fotografía, se priorizan sensores avanzados de alta resolución (mínimo 48MP)
         filtrosSugeridos.camara_min = 48;
-        filtrosSugeridos.ram_min = 6; // Se sube la RAM para procesamiento de imágenes complejas
+        filtrosSugeridos.ram_min = 6;
         break;
 
       case "redes":
       case "basico":
-        // REGLA: Para tareas básicas (redes sociales, llamadas), se mantienen parámetros estándar para optimizar costo
         filtrosSugeridos.ram_min = 4;
         filtrosSugeridos.procesador = "media";
         break;
-        
+
       default:
-        // Caso preventivo: Perfil equilibrado estándar
         filtrosSugeridos.ram_min = 4;
         break;
     }
 
-    // 3. Regla Condicional Cruzada: Evaluar autonomía si el usuario lo requiere expresamente
     if (requiere_bateria === true || requiere_bateria === "si") {
-      filtrosSugeridos.bateria_min = 4500; // Forzamos una batería de larga duración en los resultados
+      filtrosSugeridos.bateria_min = 4500;
     }
 
-    // 4. Respondemos al Frontend con las directivas calculadas por el Sistema Experto
     res.json({
       success: true,
       mensaje: "Perfil evaluado por el sistema experto con éxito",
@@ -929,10 +1037,7 @@ app.post("/api/recomendar", (req, res) => {
   }
 });
 
-
 // POST /api/gemini
-// Recibe el catálogo de productos + historial + mensaje desde el frontend
-// y llama a la API de Groq, devolviendo la respuesta al cliente.
 app.post("/api/gemini", async (req, res) => {
   try {
     const { catalogo, historial, mensaje } = req.body;
@@ -946,7 +1051,6 @@ app.post("/api/gemini", async (req, res) => {
       return res.status(500).json({ error: "API key de Groq no configurada" });
     }
 
-    // ── Extraer presupuesto del mensaje o historial para filtrarlo en el servidor ──
     function extraerPresupuesto(textos) {
       const combined = textos.join(" ");
       const m = combined.match(/\b(\d{2,4}(?:[.,]\d{3})*)\s*(?:pesos?|peso|\$)?/gi);
@@ -961,7 +1065,6 @@ app.post("/api/gemini", async (req, res) => {
     const textosHistorial = Array.isArray(historial) ? historial.map(t => t.text || "") : [];
     const presupuesto = extraerPresupuesto([mensaje, ...textosHistorial]);
 
-    // ── Filtrar catálogo por presupuesto antes de mandarlo a la IA ──
     let catalogoFiltrado = catalogo || "";
     if (presupuesto && catalogoFiltrado) {
       const lineas = catalogoFiltrado.split("\n");
@@ -1013,7 +1116,6 @@ OTRAS REGLAS:
 CATALOGO ACTUAL EN STOCK:
 ${catalogoFiltrado}`;
 
-    // Armar mensajes para Groq (formato OpenAI compatible)
     const messages = [
       { role: "system", content: systemPrompt },
     ];
@@ -1066,9 +1168,6 @@ ${catalogoFiltrado}`;
 
 
 // ── SCORES NANOREVIEW ─────────────────────────────────────────────────────
-// POST /api/scores
-// Recibe { marca, nombre } y devuelve { antutu, dxomark } scrapeando nanoreview.net
-// Se llama desde el admin de InfinityFree que no puede hacer requests externos.
 
 app.post("/api/scores", async (req, res) => {
   const { marca = "", nombre = "" } = req.body;
@@ -1077,7 +1176,6 @@ app.post("/api/scores", async (req, res) => {
     return res.status(400).json({ error: "Faltan marca y nombre" });
   }
 
-  // ── Construir slugs posibles ──────────────────────────────────────────
   function buildSlug(m, n) {
     return (m + " " + n)
       .toLowerCase()
@@ -1088,15 +1186,12 @@ app.post("/api/scores", async (req, res) => {
   }
 
   const slugs = [buildSlug(marca, nombre)];
-  // Si el nombre ya incluye la marca (ej: "Samsung Galaxy A17"), probar sin marca
   if (nombre.toLowerCase().includes(marca.toLowerCase())) {
     slugs.push(buildSlug("", nombre));
   }
-  // Solo primera palabra de la marca
   const primeraMarca = marca.split(" ")[0];
   if (primeraMarca !== marca) slugs.push(buildSlug(primeraMarca, nombre));
 
-  // ── Fetch Nanoreview ──────────────────────────────────────────────────
   async function fetchNanoreview(slug) {
     const url = `https://nanoreview.net/en/phone/${slug}`;
     try {
@@ -1110,7 +1205,6 @@ app.post("/api/scores", async (req, res) => {
       });
       if (!r.ok) return null;
       const html = await r.text();
-      // Verificar que es página de un celular real
       if (!html.includes("AnTuTu") && !html.includes("NanoReview Score")) return null;
       return html;
     } catch {
@@ -1118,18 +1212,15 @@ app.post("/api/scores", async (req, res) => {
     }
   }
 
-  // ── Parsear scores del HTML ───────────────────────────────────────────
   function parsearScores(html) {
     let antutu = null;
     let camara = null;
 
-    // AnTuTu: "AnTuTu Benchmark 11\n\n3323591"
     let m = html.match(/AnTuTu\s+Benchmark\s+\d+\s*[\r\n\s]+([\d,]+)/i);
     if (m) {
       const n = parseInt(m[1].replace(/,/g, ""));
       if (n > 100000 && n < 5000000) antutu = n;
     }
-    // AnTuTu fallback: "Total score | 3323591"
     if (!antutu) {
       m = html.match(/Total\s+score\s*[|:]\s*([\d,]+)/i);
       if (m) {
@@ -1137,7 +1228,6 @@ app.post("/api/scores", async (req, res) => {
         if (n > 100000 && n < 5000000) antutu = n;
       }
     }
-    // AnTuTu fallback 2: número de 6-7 dígitos cerca de "AnTuTu"
     if (!antutu) {
       const pos = html.indexOf("AnTuTu");
       if (pos !== -1) {
@@ -1150,15 +1240,6 @@ app.post("/api/scores", async (req, res) => {
       }
     }
 
-    // Camera score
-    // Nanoreview puede tener el número con o sin asterisco:
-    //   <span class="score-bar-result-square">90</span>
-    //   <span class="score-bar-result-square">90*</span>  <- score aproximado
-    //
-    // Estrategia: encontrar todas las ocurrencias de ">Camera<" en el HTML,
-    // tomar 600 chars adelante, cortar antes del próximo score-bar-name
-    // (para no mezclar con Gaming u otros scores), y extraer el número.
-    // El regex es permisivo: acepta cualquier char no-< entre el número y </span>.
     {
       const re = />\s*Camera\s*<\/div>/gi;
       let camMatch;
@@ -1167,16 +1248,12 @@ app.post("/api/scores", async (req, res) => {
         const nextName = frag.search(/score-bar-name/i);
         const searchIn = nextName > 20 ? frag.slice(0, nextName) : frag;
 
-        // Caso 1 — score-bar-result-square (Samsung, Vivo, etc.)
-        //   <span class="score-bar-result-square">93</span>
         const mCam1 = searchIn.match(/score-bar-result-square[^>]*>\s*(\d{2,3})[^<]*<\/span>/i);
         if (mCam1) {
           const n = parseInt(mCam1[1]);
           if (n >= 20 && n <= 100) { camara = n; break; }
         }
 
-        // Caso 2 — score-bar-result-number-review (Xiaomi, iPhone, etc.)
-        //   <span class="score-bar-result-number-review"> <span style="">90</span>
         const mCam2 = searchIn.match(/score-bar-result-number-review[^>]*>[\s\S]{0,50}?<span[^>]*>\s*(\d{2,3})\s*<\/span>/i);
         if (mCam2) {
           const n = parseInt(mCam2[1]);
@@ -1184,7 +1261,6 @@ app.post("/api/scores", async (req, res) => {
         }
       }
     }
-    // Último fallback global — cualquiera de las dos clases
     if (!camara) {
       const mFallback = html.match(/Camera[\s\S]{1,500}?(?:score-bar-result-square|score-bar-result-number-review)[^>]*>[\s\S]{0,80}?(\d{2,3})[^<]*<\/span>/i);
       if (mFallback) {
@@ -1196,7 +1272,6 @@ app.post("/api/scores", async (req, res) => {
     return { antutu, dxomark: camara };
   }
 
-  // ── Intentar cada slug ────────────────────────────────────────────────
   let html = null;
   let slugUsado = null;
 
@@ -1218,44 +1293,17 @@ app.post("/api/scores", async (req, res) => {
   scores.slug = slugUsado;
   scores.url  = `https://nanoreview.net/en/phone/${slugUsado}`;
 
-  // ── DEBUG TEMPORAL ────────────────────────────────────────────────────
-  const camIdx = html.search(/Camera/i);
-  if (camIdx !== -1) {
-    console.log("[DEBUG] HTML alrededor de 'Camera' (300 chars):");
-    console.log(JSON.stringify(html.slice(Math.max(0, camIdx - 100), camIdx + 400)));
-  } else {
-    console.log("[DEBUG] 'Camera' NO encontrado en el HTML");
-  }
-  // Buscar score-bar-result-square cerca de Camera
-  const camBlockIdx = html.search(/>\s*Camera\s*<\/div>/i);
-  if (camBlockIdx !== -1) {
-    console.log("[DEBUG] Bloque Camera tag (600 chars adelante):");
-    console.log(JSON.stringify(html.slice(camBlockIdx, camBlockIdx + 600)));
-  }
-  console.log("[DEBUG] scores resultado:", JSON.stringify(scores));
-  // ─────────────────────────────────────────────────────────────────────
-
   res.json(scores);
 });
 
-
 // ═══════════════════════════════════════════════════════════════════════
 // PROXY hacia InfinityFree (MySQL)
-// ═══════════════════════════════════════════════════════════════════════
-// La app NUNCA le habla directo a InfinityFree (lo bloquea porque no
-// viene "de un navegador"). En cambio, le habla a ESTE endpoint, y
-// este servidor (Render) reenvía el pedido servidor-a-servidor, sin
-// pasar por el bloqueo (InfinityFree no distingue esto de cualquier
-// otro tráfico normal de servidor).
-//
-// También reenvía la cookie de sesión de PHP en los dos sentidos, para
-// que el login siga funcionando igual que antes.
 // ═══════════════════════════════════════════════════════════════════════
 const INFINITYFREE_BASE = "https://celustore.66ghz.com/api";
 
 app.all("/api/mysql/*", async (req, res) => {
   try {
-    const ruta = req.params[0]; // ej: 'auth/login.php'
+    const ruta = req.params[0];
     const queryString = req.originalUrl.split("?")[1];
     const url = `${INFINITYFREE_BASE}/${ruta}${queryString ? "?" + queryString : ""}`;
 
@@ -1273,8 +1321,6 @@ app.all("/api/mysql/*", async (req, res) => {
       opciones.body = JSON.stringify(req.body || {});
     }
 
-    // Timeout explícito: si InfinityFree no responde en 25s, cortamos
-    // (mejor un error claro que dejar la petición colgada para siempre)
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 25000);
     opciones.signal = controller.signal;
@@ -1289,9 +1335,6 @@ app.all("/api/mysql/*", async (req, res) => {
     }
     clearTimeout(timer);
 
-    // Reenviamos la cookie de sesión de PHP, pero sacándole el "Domain"
-    // (así el navegador/WebView la guarda como cookie de ESTE dominio,
-    // ya que la app nunca habla directo con InfinityFree)
     const setCookie = typeof resp.headers.getSetCookie === "function" ? resp.headers.getSetCookie() : [];
     if (setCookie.length) {
       const reescritas = setCookie.map((c) => c.replace(/;\s*Domain=[^;]+/i, ""));
@@ -1300,8 +1343,6 @@ app.all("/api/mysql/*", async (req, res) => {
 
     const texto = await resp.text();
 
-    // Si InfinityFree (o algo en el medio) no devolvió JSON, no lo
-    // mandamos como si lo fuera — eso rompe la app en silencio.
     let esJsonValido = true;
     try { JSON.parse(texto); } catch { esJsonValido = false; }
 
@@ -1322,9 +1363,7 @@ app.all("/api/mysql/*", async (req, res) => {
   }
 });
 
-// GET /health — endpoint liviano para el ping externo (cron-job.org) que
-// mantiene despierta la API en Render. No toca la base de datos, así
-// que es lo más barato posible para pegarle cada 10 minutos.
+// GET /health — endpoint liviano para el ping externo (cron-job.org)
 app.get("/health", (req, res) => {
   res.json({ ok: true, hora: new Date().toISOString() });
 });
