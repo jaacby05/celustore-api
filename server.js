@@ -421,9 +421,26 @@ app.post("/api/app/ordenes", async (req, res) => {
       return res.json({ error: "Faltan datos para crear la orden" });
     }
     const itemsCarrito = await CarritoMovil.find({ usuario_email: datos.usuario_email });
+
+    // ── IMPORTANTE: nunca crear una orden con el carrito vacío ──────────
+    // Esto pasaba cuando el servidor se estaba despertando (cold start
+    // de Render) justo en el momento de agregar al carrito: esa
+    // petición quedaba encolada en el dispositivo (offline-first) y el
+    // checkout se disparaba antes de que la sincronización terminara,
+    // generando una orden fantasma en $0.
+    if (itemsCarrito.length === 0) {
+      return res.json({
+        error: "Tu carrito está vacío del lado del servidor todavía (puede ser que falte sincronizar). Esperá unos segundos y volvé a intentar.",
+      });
+    }
+
     const subtotal = itemsCarrito.reduce((s, i) => s + i.precio * i.cantidad, 0);
     const costo_envio = Number(datos.costo_envio) || 0;
     const total = subtotal + costo_envio;
+
+    if (total <= 0) {
+      return res.json({ error: "El total de la orden es inválido" });
+    }
     const items = itemsCarrito.map((i) => ({
       producto_id: i.producto_id, producto_nombre: i.producto_nombre,
       cantidad: i.cantidad, precio: i.precio,
