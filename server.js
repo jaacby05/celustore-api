@@ -446,13 +446,15 @@ app.post("/api/app/ordenes", async (req, res) => {
 // AGREGADO PARA MERCADO PAGO — rutas de pago para la app
 // ══════════════════════════════════════════════════════════════════════════
 
-// POST /api/app/pagos/procesar
-app.post("/api/app/pagos/procesar", async (req, res) => {
+// POST /api/app/pagos/crear-preferencia
+// Checkout Pro: en vez de tokenizar la tarjeta adentro de la propia app
+// (lo que no anduvo bien en el WebView), se crea una "preferencia" de
+// pago en Mercado Pago y se le devuelve a la app la URL (init_point)
+// para que la abra en el navegador real del celular.
+app.post("/api/app/pagos/crear-preferencia", async (req, res) => {
   try {
-    const { numero_orden, token, installments, payment_method_id, issuer_id, email } = req.body || {};
-    if (!numero_orden || !token || !payment_method_id) {
-      return res.json({ error: "Faltan datos del pago" });
-    }
+    const { numero_orden } = req.body || {};
+    if (!numero_orden) return res.json({ error: "Falta numero_orden" });
 
     const orden = await OrdenMovil.findOne({ numero_orden });
     if (!orden) return res.json({ error: "Orden no encontrada" });
@@ -460,51 +462,170 @@ app.post("/api/app/pagos/procesar", async (req, res) => {
       return res.json({ error: "Esta orden ya fue procesada anteriormente" });
     }
 
-    const idempotencyKey = "orden-" + orden._id.toString() + "-" + Date.now();
-    const body = {
-      transaction_amount: Number(orden.total),
-      token,
-      description: "CeluStore App - Orden " + numero_orden,
-      installments: installments > 0 ? installments : 1,
-      payment_method_id,
-      binary_mode: true,
-      payer: { email: email || null },
-      external_reference: numero_orden,
-      notification_url: "https://celustore-api-xlsm.onrender.com/api/app/pagos/webhook",
-    };
-    if (issuer_id) body.issuer_id = issuer_id;
-
-    const mpRes = await fetch(MP_API_BASE + "/v1/payments", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + MP_ACCESS_TOKEN,
-        "X-Idempotency-Key": idempotencyKey,
-      },
-      body: JSON.stringify(body),
-    });
-    const pago = await mpRes.json();
-
-    if (!mpRes.ok || !pago.status) {
-      console.error("Error MP (app):", pago);
-      return res.json({ error: "Mercado Pago rechazo la solicitud: " + (pago.message || "error desconocido") });
+    const items = orden.items.map((i) => ({
+      title: i.producto_nombre || "Producto CeluStore",
+      quantity: i.cantidad,
+      unit_price: Number(i.precio),
+      currency_id: "ARS",
+    }));
+    if (orden.costo_envio > 0) {
+      items.push({ title: "Costo de envío", quantity: 1, unit_price: Number(orden.costo_envio), currency_id: "ARS" });
     }
 
-    const resultado = await confirmarPagoOrdenMovil(
-      numero_orden, String(pago.id || ""), pago.status, pago.status_detail || ""
-    );
+    const BASE_RENDER = "https://celustore-api-xlsm.onrender.com";
+    const body = {
+      items,
+      external_reference: numero_orden,
+      notification_url: BASE_RENDER + "/api/app/pagos/webhook",
+      back_urls: {
+        success: BASE_RENDER + "/api/app/pagos/retorno?status=success",
+        failure: BASE_RENDER + "/api/app/pagos/retorno?status=failure",
+        pending: BASE_RENDER + "/api/app/pagos/retorno?status=pending",
+      },
+      auto_return: "approved",
+      payer: { email: orden.usuario_email !== "invitado" ? orden.usuario_email : undefined },
+    };
 
-    res.json({
-      success: true, mp_status: pago.status, mp_status_detail: pago.status_detail,
-      numero_orden, confirmacion: resultado,
+    const mpRes = await fetch(MP_API_BASE + "/checkout/preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + MP_ACCESS_TOKEN },
+      body: JSON.stringify(body),
     });
+    const pref = await mpRes.json();
+
+    if (!mpRes.ok || !pref.id) {
+      console.error("Error MP crear-preferencia:", pref);
+      return res.json({ error: "No se pudo generar el link de pago: " + (pref.message || "error desconocido") });
+    }
+
+    // Con credenciales TEST-..., el link de sandbox es el que hay que
+    // usar para probar sin plata real.
+    const urlPago = pref.sandbox_init_point || pref.init_point;
+    res.json({ success: true, url_pago: urlPago, preference_id: pref.id });
   } catch (e) {
-    console.error("Error /api/app/pagos/procesar:", e);
+    console.error("Error /api/app/pagos/crear-preferencia:", e);
     res.status(500).json({ error: e.message });
   }
 });
 
-// POST /api/app/pagos/webhook
+// GET /api/app/pagos/retorno — página simple a la que Mercado Pago
+// redirige después de pagar. Solo le dice al usuario que vuelva a la
+// app; el estado real de la orden lo confirma el webhook por separado.
+app.get("/api/app/pagos/retorno", (req, res) => {
+  const status = req.query.status || "pending";
+  const mensajes = {
+    success: { emoji: "✅", texto: "¡Pago aprobado!" },
+    failure: { emoji: "❌", texto: "El pago no se pudo completar." },
+    pending: { emoji: "⏳", texto: "Tu pago está pendiente de confirmación." },
+  };
+  const m = mensajes[status] || mensajes.pending;
+  res.send(`
+    <!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CeluStore</title></head>
+    <body style="font-family:sans-serif; text-align:center; padding:60px 20px; background:#0f0f1a; color:#fff;">
+      <h1 style="font-size:48px; margin-bottom:0;">${m.emoji}</h1>
+      <h2>${m.texto}</h2>
+      <p style="color:#aaa;">Podés cerrar esta ventana y volver a la app CeluStore para ver el estado de tu pedido.</p>
+    </body></html>
+  `);
+});
+
+// POST /api/app/pagos/crear-preferencia — Checkout Pro (redirección al
+// navegador). Se usa en la APP en vez del Brick embebido, porque los
+// Bricks (iframes de Mercado Pago) no cargan bien dentro de un WebView
+// de Capacitor con origen "https://localhost" — Checkout Pro evita ese
+// problema porque el pago se hace en el navegador real del celular.
+app.post("/api/app/pagos/crear-preferencia", async (req, res) => {
+  try {
+    const { numero_orden } = req.body || {};
+    if (!numero_orden) return res.json({ error: "Falta numero_orden" });
+
+    const orden = await OrdenMovil.findOne({ numero_orden });
+    if (!orden) return res.json({ error: "Orden no encontrada" });
+    if (orden.estado_pago !== "pendiente_pago") {
+      return res.json({ error: "Esta orden ya fue procesada anteriormente" });
+    }
+
+    const body = {
+      items: [{
+        title: "CeluStore App - Orden " + numero_orden,
+        quantity: 1,
+        unit_price: Number(orden.total),
+        currency_id: "ARS",
+      }],
+      external_reference: numero_orden,
+      notification_url: "https://celustore-api-xlsm.onrender.com/api/app/pagos/webhook",
+      back_urls: {
+        success: "https://celustore-api-xlsm.onrender.com/api/app/pagos/retorno?estado=success",
+        failure: "https://celustore-api-xlsm.onrender.com/api/app/pagos/retorno?estado=failure",
+        pending: "https://celustore-api-xlsm.onrender.com/api/app/pagos/retorno?estado=pending",
+      },
+      auto_return: "approved",
+    };
+
+    const mpRes = await fetch(MP_API_BASE + "/checkout/preferences", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + MP_ACCESS_TOKEN,
+      },
+      body: JSON.stringify(body),
+    });
+    const pref = await mpRes.json();
+
+    if (!mpRes.ok || !pref.id) {
+      console.error("Error creando preferencia MP:", pref);
+      return res.json({ error: "No se pudo generar el link de pago" });
+    }
+
+    res.json({ success: true, init_point: pref.init_point, preference_id: pref.id });
+  } catch (e) {
+    console.error("Error /api/app/pagos/crear-preferencia:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/app/pagos/retorno — página simple a la que Mercado Pago
+// redirige después de pagar. Solo muestra un mensaje: la app NO
+// depende de esto para saber si el pago se confirmó (usa el webhook,
+// que es la fuente confiable), esto es solo para que el usuario vea
+// algo prolijo antes de volver a la app a mano.
+app.get("/api/app/pagos/retorno", (req, res) => {
+  const estado = req.query.estado || "pending";
+  const mensajes = {
+    success: "✅ ¡Pago aprobado! Ya podés volver a la app CeluStore.",
+    failure: "❌ El pago no se pudo procesar. Volvé a la app para reintentar.",
+    pending: "⏳ Tu pago está en revisión. Te avisaremos por email.",
+  };
+  res.send(`
+    <html><body style="font-family:sans-serif;text-align:center;padding:60px 20px;background:#0f0f1a;color:#e0e0e0">
+      <h2>${mensajes[estado] || mensajes.pending}</h2>
+      <p style="color:#aaa">Podés cerrar esta pestaña y volver a la app.</p>
+    </body></html>
+  `);
+});
+
+// GET /api/app/pagos/estado — la app la usa al volver del navegador,
+// para saber si el pago ya se confirmó (el webhook ya debería haber
+// actualizado la orden para este momento).
+app.get("/api/app/pagos/estado", async (req, res) => {
+  try {
+    const { numero_orden } = req.query;
+    if (!numero_orden) return res.json({ error: "Falta numero_orden" });
+    const orden = await OrdenMovil.findOne({ numero_orden });
+    if (!orden) return res.json({ error: "Orden no encontrada" });
+    res.json({
+      success: true,
+      estado_pago: orden.estado_pago,
+      mp_status_detail: orden.mp_status_detail,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
 app.post("/api/app/pagos/webhook", async (req, res) => {
   try {
     const paymentId = req.body?.data?.id || req.query.id || req.query["data.id"];
