@@ -500,6 +500,10 @@ app.post("/api/app/pagos/crear-preferencia", async (req, res) => {
         pending: BASE_RENDER + "/api/app/pagos/retorno?status=pending",
       },
       auto_return: "approved",
+      // binary_mode: sin esto, Mercado Pago puede dejar el pago en
+      // "pending" (revisión antifraude asíncrona, incluso en modo de
+      // prueba) en vez de resolver directo a aprobado/rechazado.
+      binary_mode: true,
       payer: { email: orden.usuario_email !== "invitado" ? orden.usuario_email : undefined },
     };
 
