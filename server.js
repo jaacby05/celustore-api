@@ -638,11 +638,19 @@ app.post("/api/app/pagos/crear-preferencia", async (req, res) => {
 // redirige después de pagar. Solo le dice al usuario que vuelva a la
 // app; el estado real de la orden lo confirma el webhook por separado.
 app.get("/api/app/pagos/retorno", (req, res) => {
-  const status = req.query.status || "pending";
+  // Mercado Pago agrega su propio "status" (approved/rejected/...) a la URL de retorno, y como
+  // nuestra back_url ya traía ?status=success, el parámetro llega DUPLICADO (Express lo convierte
+  // en un array) y antes siempre caía en "pendiente". Ahora se toma el último valor y se aceptan
+  // los dos vocabularios (success/failure y approved/rejected).
+  const crudo = req.query.collection_status || req.query.status || "pending";
+  const status = String(Array.isArray(crudo) ? crudo[crudo.length - 1] : crudo);
   const mensajes = {
-    success: { emoji: "✅", texto: "¡Pago aprobado!" },
-    failure: { emoji: "❌", texto: "El pago no se pudo completar." },
-    pending: { emoji: "⏳", texto: "Tu pago está pendiente de confirmación." },
+    success:  { emoji: "✅", texto: "¡Pago aprobado!" },
+    approved: { emoji: "✅", texto: "¡Pago aprobado!" },
+    failure:  { emoji: "❌", texto: "El pago no se pudo completar." },
+    rejected: { emoji: "❌", texto: "El pago no se pudo completar." },
+    pending:  { emoji: "⏳", texto: "Tu pago está pendiente de confirmación." },
+    in_process: { emoji: "⏳", texto: "Tu pago está pendiente de confirmación." },
   };
   const m = mensajes[status] || mensajes.pending;
   res.send(`
