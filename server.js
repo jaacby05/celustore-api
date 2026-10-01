@@ -150,6 +150,14 @@ const cajaMayoristaSchema = new mongoose.Schema(
     categoria:   { type: String, required: true },
     descripcion: { type: String, required: true },
     monto:       { type: Number, required: true },
+    // ── Trazabilidad (todo opcional: los movimientos viejos no los tienen) ──
+    origen:         { type: String, enum: ["app", "mayorista"], default: "mayorista" },
+    metodo_pago:    { type: String, default: null },   // efectivo | transferencia | mercadopago | otro
+    cliente_email:  { type: String, default: null },
+    orden_numero:   { type: String, default: null },
+    mp_payment_id:  { type: String, default: null },
+    comprobante:    { type: String, default: null },
+    registrado_por: { type: String, default: null },   // quién lo cargó (admin) o "Sistema"
   },
   { timestamps: true }
 );
@@ -297,6 +305,13 @@ async function confirmarPagoOrdenMovil(numero_orden, mp_payment_id, mp_status, m
                 }
             }
         }
+        await CajaMayorista.create({
+            tipo: "egreso", categoria: "reembolso", origen: "app",
+            descripcion: `Reembolso/contracargo (${mp_status}) - Pedido ${orden.numero_orden}`, monto: orden.total,
+            metodo_pago: "mercadopago", cliente_email: orden.usuario_email,
+            orden_numero: orden.numero_orden, mp_payment_id: String(mp_payment_id || "") || null,
+            registrado_por: "Sistema (pago automático)",
+        });
         orden.estado_pago = "cancelado";
         orden.mp_status_detail = mp_status_detail;
         orden.stock_descontado = false;
@@ -345,6 +360,15 @@ async function confirmarPagoOrdenMovil(numero_orden, mp_payment_id, mp_status, m
             }
         }
         orden.stock_descontado = true;
+
+        // Antes las ventas con tarjeta de la app NO quedaban en ninguna caja.
+        await CajaMayorista.create({
+            tipo: "ingreso", categoria: "venta_app", origen: "app",
+            descripcion: `Venta app - Pedido ${orden.numero_orden}`, monto: orden.total,
+            metodo_pago: "mercadopago", cliente_email: orden.usuario_email,
+            orden_numero: orden.numero_orden, mp_payment_id: String(mp_payment_id || "") || null,
+            registrado_por: "Sistema (pago automático)",
+        });
     }
 
     await orden.save();
@@ -893,8 +917,11 @@ app.post("/api/app/ordenes-mayoristas", async (req, res) => {
 
     if (total > 0) {
       await CajaMayorista.create({
-        tipo: "ingreso", categoria: "venta_mayorista",
+        tipo: "ingreso", categoria: "venta_mayorista", origen: "mayorista",
         descripcion: `Venta mayorista - Pedido ${numero_orden}`, monto: total,
+        metodo_pago: ["efectivo", "transferencia", "mercadopago", "otro"].includes(datos.metodo_pago) ? datos.metodo_pago : "transferencia",
+        cliente_email: datos.usuario_email, orden_numero: numero_orden,
+        registrado_por: "Sistema (pedido mayorista)",
       });
     }
 
@@ -937,13 +964,22 @@ app.get("/api/app/ordenes", async (req, res) => {
 // GET /api/app/admin/caja-mayorista
 app.get("/api/app/admin/caja-mayorista", async (req, res) => {
   try {
-    const movimientos = await CajaMayorista.find().sort({ createdAt: -1 });
+    let movimientos = await CajaMayorista.find().sort({ createdAt: -1 });
+    // La pantalla "Caja Mayorista" pide solo=mayorista para no mezclar las ventas con tarjeta de la app.
+    if (req.query.solo === "mayorista") {
+      movimientos = movimientos.filter(m => m.origen !== "app" && m.categoria !== "venta_app");
+    }
     const total_ingresos = movimientos.filter(m => m.tipo === "ingreso").reduce((s, m) => s + m.monto, 0);
     const total_egresos = movimientos.filter(m => m.tipo === "egreso").reduce((s, m) => s + m.monto, 0);
     res.json({
       success: true, saldo: total_ingresos - total_egresos, total_ingresos, total_egresos,
       movimientos: movimientos.map(m => ({
+        id: m._id.toString(),
         tipo: m.tipo, categoria: m.categoria, descripcion: m.descripcion, monto: m.monto, fecha: m.createdAt,
+        origen: m.origen || (m.categoria === "venta_app" ? "app" : "mayorista"),
+        metodo_pago: m.metodo_pago || null, cliente_email: m.cliente_email || null,
+        orden_numero: m.orden_numero || null, mp_payment_id: m.mp_payment_id || null,
+        comprobante: m.comprobante || null, registrado_por: m.registrado_por || null,
       })),
     });
   } catch (e) {
@@ -954,10 +990,15 @@ app.get("/api/app/admin/caja-mayorista", async (req, res) => {
 // POST /api/app/admin/caja-mayorista
 app.post("/api/app/admin/caja-mayorista", async (req, res) => {
   try {
-    const { categoria, monto, descripcion } = req.body || {};
+    const { categoria, monto, descripcion, metodo_pago, comprobante, registrado_por } = req.body || {};
     if (!monto || monto <= 0) return res.json({ error: "Ingresá un monto válido" });
     if (!descripcion) return res.json({ error: "Ingresá una descripción" });
-    await CajaMayorista.create({ tipo: "egreso", categoria: categoria || "otro", descripcion, monto });
+    await CajaMayorista.create({
+      tipo: "egreso", categoria: categoria || "otro", descripcion, monto: Number(monto), origen: "mayorista",
+      metodo_pago: ["efectivo", "transferencia", "mercadopago", "otro"].includes(metodo_pago) ? metodo_pago : null,
+      comprobante: comprobante ? String(comprobante).slice(0, 100) : null,
+      registrado_por: registrado_por ? String(registrado_por).slice(0, 80) : "Admin (panel)",
+    });
     res.json({ success: true, mensaje: "Egreso registrado correctamente" });
   } catch (e) {
     res.status(500).json({ error: e.message });
