@@ -205,6 +205,45 @@ const CANTIDAD_MINIMA_MAYORISTA = 10;
 const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
 const MP_API_BASE = "https://api.mercadopago.com";
 
+// Modo de las credenciales: producción (APP_USR-...) o prueba (TEST-...)
+const MP_PRODUCCION = (MP_ACCESS_TOKEN || "").startsWith("APP_USR-");
+
+// Clave compartida con el PHP de InfinityFree para las rutas /api/app/admin/*.
+// Se configura como variable de entorno ADMIN_API_KEY en Render.
+function requireAdminKey(req, res, next) {
+  const esperada = process.env.ADMIN_API_KEY;
+  const recibida = req.get("x-admin-key");
+  if (!esperada || !recibida || recibida !== esperada) {
+    return res.status(403).json({ error: "Acceso no autorizado" });
+  }
+  next();
+}
+app.use("/api/app/admin", requireAdminKey);
+
+// Costo de envío calculado SIEMPRE en el servidor (antes lo mandaba el cliente).
+// Mismos valores que ya mostraba la app: express $2500, el resto sin costo.
+function costoEnvioServidor(tipo) {
+  switch (tipo) {
+    case "estandar": return 0;
+    case "express":  return 2500;
+    case "retiro":   return 0;
+    default:         return null; // tipo inexistente
+  }
+}
+
+// Verifica que el pago real de Mercado Pago corresponda a la orden.
+// Devuelve null si está todo bien, o un texto con el motivo.
+function validarPagoContraOrden(pago, orden) {
+  if (pago.currency_id !== "ARS") return "moneda distinta de ARS";
+  if (Math.abs(Number(pago.transaction_amount) - Number(orden.total)) > 0.01) {
+    return `monto del pago (${pago.transaction_amount}) distinto al total de la orden (${orden.total})`;
+  }
+  if (pago.external_reference !== orden.numero_orden) return "external_reference no coincide";
+  if (Boolean(pago.live_mode) !== MP_PRODUCCION) return "live_mode no coincide con las credenciales configuradas";
+  if (pago.status === "approved" && pago.status_detail !== "accredited") return "aprobado sin status_detail=accredited";
+  return null;
+}
+
 const auditoriaMovilSchema = new mongoose.Schema(
   {
     coleccion_afectada: { type: String, required: true },
@@ -221,7 +260,7 @@ const AuditoriaMovil = mongoose.model("AuditoriaMovil", auditoriaMovilSchema, "a
 
 // Función que reemplaza al "trigger + procedimiento almacenado" para
 // las órdenes de la app (Mongo no tiene triggers nativos como MySQL).
-async function confirmarPagoOrdenMovil(numero_orden, mp_payment_id, mp_status, mp_status_detail) {
+async function confirmarPagoOrdenMovil(numero_orden, mp_payment_id, mp_status, mp_status_detail, pago = null) {
     let nuevoEstadoPago;
     if (mp_status === "approved") nuevoEstadoPago = "aprobado";
     else if (mp_status === "rejected") nuevoEstadoPago = "rechazado";
@@ -230,6 +269,46 @@ async function confirmarPagoOrdenMovil(numero_orden, mp_payment_id, mp_status, m
 
     const orden = await OrdenMovil.findOne({ numero_orden });
     if (!orden) return { resultado: "error", mensaje: "La orden no existe" };
+
+    // ── Validar el pago real contra la orden antes de creerle a "approved" ──
+    if (pago && nuevoEstadoPago === "aprobado") {
+        const motivo = validarPagoContraOrden(pago, orden);
+        if (motivo) {
+            await AuditoriaMovil.create({
+                coleccion_afectada: "ordenes_movil", registro_id: orden._id.toString(),
+                accion: "pago_inconsistente", campo: "mp_payment_id",
+                valor_anterior: null, valor_nuevo: `${mp_payment_id} — ${motivo}`.slice(0, 255),
+                usuario_email: orden.usuario_email,
+            });
+            console.error(`confirmarPagoOrdenMovil: ${numero_orden} NO aprobada — ${motivo}`);
+            return { resultado: "error", mensaje: "El pago no coincide con la orden: " + motivo };
+        }
+    }
+
+    // ── Reembolso / contracargo de una orden ya aprobada: devolver stock ──
+    if (orden.estado_pago === "aprobado" && nuevoEstadoPago === "cancelado") {
+        if (orden.stock_descontado) {
+            for (const item of orden.items) {
+                const idNum = Number(item.producto_id);
+                if (!isNaN(idNum)) {
+                    await ProductoApp.findOneAndUpdate({ id_mysql: idNum }, { $inc: { stock: item.cantidad } });
+                    // cantidad negativa = devolución; el PHP la suma de nuevo al stock de MySQL
+                    await StockPendiente.create({ id_mysql: idNum, cantidad: -item.cantidad });
+                }
+            }
+        }
+        orden.estado_pago = "cancelado";
+        orden.mp_status_detail = mp_status_detail;
+        orden.stock_descontado = false;
+        await AuditoriaMovil.create({
+            coleccion_afectada: "ordenes_movil", registro_id: orden._id.toString(),
+            accion: "cambio_estado_pago", campo: "estado_pago",
+            valor_anterior: "aprobado", valor_nuevo: "cancelado",
+            usuario_email: orden.usuario_email,
+        });
+        await orden.save();
+        return { resultado: "ok", mensaje: "Orden reembolsada: stock devuelto" };
+    }
 
     if (orden.estado_pago === "aprobado" && orden.stock_descontado) {
         return { resultado: "sin_cambios", mensaje: "La orden ya estaba confirmada previamente" };
@@ -376,11 +455,21 @@ app.get("/api/app/productos/:id", async (req, res) => {
 // POST /api/app/carrito
 app.post("/api/app/carrito", async (req, res) => {
   try {
-    const { producto_id, producto_nombre, cantidad, precio, usuario_email, imagen } = req.body || {};
+    const { producto_id, cantidad, usuario_email } = req.body || {};
     if (!producto_id || !cantidad || !usuario_email) {
       return res.json({ error: "Faltan datos para agregar al carrito" });
     }
-    const item = await CarritoMovil.create({ producto_id, producto_nombre, cantidad, precio, usuario_email, imagen });
+    const cant = Math.floor(Number(cantidad));
+    if (!Number.isFinite(cant) || cant < 1) {
+      return res.json({ error: "Cantidad inválida" });
+    }
+    // El precio, nombre e imagen salen del catálogo del servidor: lo que mande el cliente se ignora.
+    const prod = await ProductoApp.findOne({ id_mysql: Number(producto_id), activo: true });
+    if (!prod) return res.json({ error: "Producto no disponible" });
+    const item = await CarritoMovil.create({
+      producto_id: String(prod.id_mysql), producto_nombre: prod.nombre,
+      cantidad: cant, precio: prod.precio, usuario_email, imagen: prod.imagen,
+    });
     res.json({ success: true, mensaje: "Agregado al carrito", item });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -434,25 +523,41 @@ app.post("/api/app/ordenes", async (req, res) => {
       });
     }
 
-    const subtotal = itemsCarrito.reduce((s, i) => s + i.precio * i.cantidad, 0);
-    const costo_envio = Number(datos.costo_envio) || 0;
+    // Se recalcula todo con datos del servidor (precio actual y stock del catálogo).
+    let subtotal = 0;
+    const itemsVerificados = [];
+    for (const i of itemsCarrito) {
+      const prod = await ProductoApp.findOne({ id_mysql: Number(i.producto_id), activo: true });
+      if (!prod) return res.json({ error: "Un producto de tu carrito ya no está disponible: " + i.producto_nombre });
+      if (i.cantidad > prod.stock) return res.json({ error: "Stock insuficiente para: " + prod.nombre });
+      subtotal += prod.precio * i.cantidad;
+      itemsVerificados.push({ ...i.toObject(), precio: prod.precio, producto_nombre: prod.nombre });
+    }
+    const costo_envio = costoEnvioServidor(datos.tipo_envio || "estandar");
+    if (costo_envio === null) return res.json({ error: "Tipo de envío inválido" });
     const total = subtotal + costo_envio;
 
     if (total <= 0) {
       return res.json({ error: "El total de la orden es inválido" });
     }
-    const items = itemsCarrito.map((i) => ({
+    const items = itemsVerificados.map((i) => ({
       producto_id: i.producto_id, producto_nombre: i.producto_nombre,
       cantidad: i.cantidad, precio: i.precio,
     }));
 
     const numero_orden = "ORD-" + Date.now();
-    const orden = await OrdenMovil.create({ ...datos, numero_orden, items, total });
+    // Campos de pago (estado_pago, total, etc.) NUNCA se toman del cliente: se arma la orden campo por campo.
+    const orden = await OrdenMovil.create({
+      usuario_email: datos.usuario_email, domicilio_envio: datos.domicilio_envio,
+      telefono_contacto: datos.telefono_contacto, tipo_envio: datos.tipo_envio || "estandar",
+      metodo_pago: ["tarjeta", "transferencia"].includes(datos.metodo_pago) ? datos.metodo_pago : "tarjeta",
+      costo_envio, numero_orden, items, total,
+    });
     await CarritoMovil.deleteMany({ usuario_email: datos.usuario_email });
     res.json({
       success: true, numero_orden, orden,
       // el front usa esto para inicializar el Brick de Mercado Pago
-      mp_public_key: "TEST-174010ef-c3d8-4fa1-b282-95e64784f14b",
+      mp_public_key: process.env.MP_PUBLIC_KEY || null,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -521,7 +626,7 @@ app.post("/api/app/pagos/crear-preferencia", async (req, res) => {
 
     // Con credenciales TEST-..., el link de sandbox es el que hay que
     // usar para probar sin plata real.
-    const urlPago = pref.sandbox_init_point || pref.init_point;
+    const urlPago = MP_PRODUCCION ? pref.init_point : (pref.sandbox_init_point || pref.init_point);
     res.json({ success: true, url_pago: urlPago, preference_id: pref.id });
   } catch (e) {
     console.error("Error /api/app/pagos/crear-preferencia:", e);
@@ -592,7 +697,7 @@ app.post("/api/app/pagos/webhook", async (req, res) => {
     const numero_orden = pago.external_reference;
     if (!numero_orden) return res.status(200).json({ error: "sin external_reference" });
 
-    await confirmarPagoOrdenMovil(numero_orden, String(paymentId), pago.status, pago.status_detail || "");
+    await confirmarPagoOrdenMovil(numero_orden, String(paymentId), pago.status, pago.status_detail || "", pago);
     res.status(200).json({ success: true });
   } catch (e) {
     console.error("Error webhook app:", e);
